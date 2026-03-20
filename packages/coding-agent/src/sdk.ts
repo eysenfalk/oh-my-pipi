@@ -899,6 +899,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		modelRegistry,
 		asyncJobManager,
 		pendingActionStore,
+		addCompression: record => session.addCompressionRecord(record),
+		getPruningStats: () => session.getPruningStats(),
 	};
 
 	// Initialize internal URL router for internal protocols (agent://, artifact://, memory://, skill://, rule://, mcp://, local://)

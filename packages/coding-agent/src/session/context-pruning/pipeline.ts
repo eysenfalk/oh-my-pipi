@@ -3,7 +3,7 @@
  * Runs all enabled strategies in order, then applies prune operations.
  */
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
-import { applyPruneOperations } from "./prune";
+import { applyCompressions, applyPruneOperations } from "./prune";
 import { syncStateFromMessages } from "./state";
 import { deduplication } from "./strategies/deduplication";
 import { purgeErrors } from "./strategies/purge-errors";
@@ -35,14 +35,17 @@ export function applyContextPruning(
 	purgeErrors(state, config);
 	supersedeWrites(state, config);
 
-	// No new prune operations → return unchanged
-	if (state.pruneMap.size === sizeBefore) return messages;
+	// If no new prune operations and no compressions, return unchanged
+	if (state.pruneMap.size === sizeBefore && state.compressions.length === 0) return messages;
 
 	// Update cumulative stats (recomputed from full pruneMap for correctness)
 	state.stats.toolsPruned = state.pruneMap.size;
+	state.stats.currentTurn = state.currentTurn;
+	state.stats.compressions = state.compressions.length;
 	let total = 0;
 	for (const tokens of state.pruneMap.values()) total += tokens;
 	state.stats.tokensSaved = total;
 
-	return applyPruneOperations(messages, state);
+	const pruned = applyPruneOperations(messages, state);
+	return applyCompressions(pruned, state);
 }

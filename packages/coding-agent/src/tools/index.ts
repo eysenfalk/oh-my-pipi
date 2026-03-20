@@ -11,6 +11,7 @@ import { LspTool } from "../lsp";
 import type { DiscoverableMCPSearchIndex, DiscoverableMCPTool } from "../mcp/discoverable-tool-metadata";
 import { EditTool } from "../patch";
 import type { PlanModeState } from "../plan-mode/state";
+import type { CompressRecord, PruningStats } from "../session/context-pruning/types";
 import { TaskTool } from "../task";
 import type { AgentOutputManager } from "../task/output-manager";
 import type { EventBus } from "../utils/event-bus";
@@ -170,6 +171,10 @@ export interface ToolSession {
 	getCheckpointState?: () => CheckpointState | undefined;
 	/** Set or clear active checkpoint state. */
 	setCheckpointState?: (state: CheckpointState | null) => void;
+	/** Add a compression record from the compress tool execution. */
+	addCompression?: (record: CompressRecord) => void;
+	/** Get current pruning statistics. */
+	getPruningStats?: () => PruningStats;
 }
 
 type ToolFactory = (session: ToolSession) => Tool | null | Promise<Tool | null>;

@@ -13,10 +13,10 @@ export function createPruneState(): PruneState {
 		toolIdList: [],
 		pruneMap: new Map(),
 		currentTurn: 0,
-		stats: { tokensSaved: 0, toolsPruned: 0 },
+		compressions: [],
+		stats: { tokensSaved: 0, toolsPruned: 0, currentTurn: 0, compressions: 0 },
 	};
 }
-
 /**
  * Build a stable signature for deduplication.
  * Serializes tool name + sorted JSON arguments.

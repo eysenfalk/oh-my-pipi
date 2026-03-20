@@ -55,6 +55,28 @@ export interface ContextPruningConfig {
 export interface PruningStats {
 	tokensSaved: number;
 	toolsPruned: number;
+	/** Current turn number (user message count) */
+	currentTurn: number;
+	/** Number of active compression blocks */
+	compressions: number;
+}
+
+/**
+ * A compression record: the model called compress() and we store its
+ * topic + summary so transformContext can hide the covered tool calls
+ * and inject the summary in their place.
+ */
+export interface CompressRecord {
+	/** Display label (e.g., 'File exploration phase') */
+	topic: string;
+	/** Technical summary replacing the compressed tool calls */
+	summary: string;
+	/** Tool calls with turn <= this value are covered by this compression */
+	upToTurn: number;
+	/** Whether this compression has already been applied (tool IDs added to coveredIds) */
+	applied: boolean;
+	/** Tool call IDs covered by this compression (populated on first apply) */
+	coveredIds: string[];
 }
 
 /**
@@ -70,6 +92,8 @@ export interface PruneState {
 	pruneMap: Map<string, number>;
 	currentTurn: number;
 	stats: PruningStats;
+	/** Registered compression blocks from the compress tool */
+	compressions: CompressRecord[];
 }
 
 /** Default protected tools — never pruned by any strategy */

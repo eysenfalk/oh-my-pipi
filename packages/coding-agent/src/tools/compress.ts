@@ -6,6 +6,7 @@ import type { AgentTool, AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { type Static, Type } from "@sinclair/typebox";
 import { renderPromptTemplate } from "../config/prompt-templates";
 import compressInstructions from "../prompts/tools/compress.md" with { type: "text" };
+import type { CompressRecord } from "../session/context-pruning/types";
 import type { ToolSession } from ".";
 
 const compressSchema = Type.Object(
@@ -30,19 +31,38 @@ export class CompressTool implements AgentTool<typeof compressSchema, void> {
 	readonly parameters = compressSchema;
 	readonly strict = true;
 
-	constructor(_session: ToolSession) {
+	#session: ToolSession;
+
+	constructor(session: ToolSession) {
+		this.#session = session;
 		this.description = renderPromptTemplate(compressInstructions);
 	}
 
 	async execute(
 		_toolCallId: string,
-		{ topic }: CompressParams,
+		{ topic, summary }: CompressParams,
 		_signal?: AbortSignal,
 	): Promise<AgentToolResult<void>> {
-		// The compress tool's effect is handled by the pruning pipeline;
-		// execution just acknowledges the compression.
+		const stats = this.#session.getPruningStats?.();
+		const currentTurn = stats?.currentTurn ?? 0;
+
+		const record: CompressRecord = {
+			topic,
+			summary,
+			upToTurn: currentTurn,
+			applied: false,
+			coveredIds: [],
+		};
+
+		this.#session.addCompression?.(record);
+
 		return {
-			content: [{ type: "text", text: `Compressed "${topic}". Summary recorded in context.` }],
+			content: [
+				{
+					type: "text",
+					text: `Compressed context up to turn ${currentTurn}: "${topic}". Summary recorded; covered tool calls will be hidden from context.`,
+				},
+			],
 		};
 	}
 }

@@ -132,6 +132,7 @@ import {
 } from "./compaction";
 import { DEFAULT_PRUNE_CONFIG, pruneToolOutputs } from "./compaction/pruning";
 import { applyContextPruning, type ContextPruningConfig, createPruneState, type PruneState } from "./context-pruning";
+import type { CompressRecord, PruningStats } from "./context-pruning/types";
 import {
 	type BashExecutionMessage,
 	type BranchSummaryMessage,
@@ -420,6 +421,7 @@ export class AgentSession {
 	#toolRegistry: Map<string, AgentTool>;
 	#transformContext: (messages: AgentMessage[], signal?: AbortSignal) => AgentMessage[] | Promise<AgentMessage[]>;
 	#pruneState: PruneState = createPruneState();
+	#lastPruneMapSize = 0;
 	#onPayload: SimpleStreamOptions["onPayload"] | undefined;
 	#convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 	#rebuildSystemPrompt: ((toolNames: string[], tools: Map<string, AgentTool>) => Promise<string>) | undefined;
@@ -475,7 +477,22 @@ export class AgentSession {
 		const baseTransform = config.transformContext ?? ((messages: AgentMessage[]) => messages);
 		this.#transformContext = async (messages: AgentMessage[], signal?: AbortSignal) => {
 			const transformed = await baseTransform(messages, signal);
-			return applyContextPruning(transformed, this.#pruneState, this.#getPruningConfig());
+			const result = applyContextPruning(transformed, this.#pruneState, this.#getPruningConfig());
+			// Notify when new items are pruned
+			const newPruneSize = this.#pruneState.pruneMap.size;
+			if (newPruneSize > this.#lastPruneMapSize) {
+				const newCount = newPruneSize - this.#lastPruneMapSize;
+				const saved = this.#pruneState.stats.tokensSaved;
+				this.#lastPruneMapSize = newPruneSize;
+				this.sessionManager.appendCustomMessageEntry(
+					"context-pruning",
+					`Context optimizer: pruned ${newCount} tool call${newCount === 1 ? "" : "s"} (~${saved} tokens saved total)`,
+					true,
+					{ pruned: newCount, tokensSaved: saved },
+					"agent",
+				);
+			}
+			return result;
 		};
 		this.#onPayload = config.onPayload;
 		this.#convertToLlm = config.convertToLlm ?? convertToLlm;
@@ -1976,6 +1993,29 @@ export class AgentSession {
 	/** Current interrupt mode */
 	get interruptMode(): "immediate" | "wait" {
 		return this.agent.getInterruptMode();
+	}
+
+	/** Current pruning statistics. */
+	getPruningStats(): PruningStats {
+		return {
+			tokensSaved: this.#pruneState.stats.tokensSaved,
+			toolsPruned: this.#pruneState.stats.toolsPruned,
+			currentTurn: this.#pruneState.currentTurn,
+			compressions: this.#pruneState.compressions.length,
+		};
+	}
+
+	/** Force a pruning pass on the current message list and return updated stats. */
+	sweepContextPruning(): PruningStats {
+		const messages = this.agent.state.messages;
+		applyContextPruning(messages, this.#pruneState, this.#getPruningConfig());
+		this.#lastPruneMapSize = this.#pruneState.pruneMap.size;
+		return this.getPruningStats();
+	}
+
+	/** Register a compression record from the compress tool. */
+	addCompressionRecord(record: CompressRecord): void {
+		this.#pruneState.compressions.push(record);
 	}
 
 	/** Current session file path, or undefined if sessions are disabled */
