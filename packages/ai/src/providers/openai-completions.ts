@@ -10,6 +10,7 @@ import type {
 	ChatCompletionToolMessageParam,
 } from "openai/resources/chat/completions";
 import { calculateCost } from "../models";
+import { getProviderConfig } from "../provider-config";
 import { getEnvApiKey } from "../stream";
 import {
 	type AssistantMessage,
@@ -598,6 +599,16 @@ function buildParams(model: Model<"openai-completions">, context: Context, optio
 
 	if (context.tools) {
 		params.tools = convertTools(context.tools, compat);
+		const providerConfig = getProviderConfig(model.provider, model.id);
+		if (providerConfig.promptOrder.sortTools && params.tools.length > 1) {
+			params.tools = [...params.tools].sort((a, b) => {
+				// All items from convertTools are standard function tools; ChatCompletionCustomTool
+				// is a type-system union member that never appears at runtime here.
+				const nameA = (a as { function?: { name?: string } }).function?.name ?? "";
+				const nameB = (b as { function?: { name?: string } }).function?.name ?? "";
+				return nameA.localeCompare(nameB);
+			});
+		}
 	} else if (hasToolHistory(context.messages)) {
 		// Anthropic (via LiteLLM/proxy) requires tools param when conversation has tool_calls/tool_results
 		params.tools = [];

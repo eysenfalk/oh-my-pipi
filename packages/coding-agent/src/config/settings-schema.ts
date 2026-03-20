@@ -708,6 +708,68 @@ export const SETTINGS_SCHEMA = {
 
 	"compaction.remoteEndpoint": { type: "string", default: undefined },
 
+	// ── Context Pruning ────────────────────────────────────────────────────────
+	"contextPruning.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "context",
+			label: "Context Pruning",
+			description: "Automatically prune redundant tool calls to reduce context size",
+		},
+	},
+
+	"contextPruning.deduplication.enabled": {
+		type: "boolean",
+		default: true,
+	},
+
+	"contextPruning.purgeErrors.enabled": {
+		type: "boolean",
+		default: true,
+	},
+
+	"contextPruning.purgeErrors.turnDelay": {
+		type: "number",
+		default: 4,
+	},
+
+	"contextPruning.supersedeWrites.enabled": {
+		type: "boolean",
+		default: true,
+	},
+
+	"contextPruning.protectedTools": {
+		type: "array",
+		default: ["skill", "read", "write", "edit", "task", "todowrite", "todoread", "compress"] as string[],
+	},
+
+	"contextPruning.protectedFilePatterns": {
+		type: "array",
+		default: [] as string[],
+	},
+
+	// ── Provider Cache ─────────────────────────────────────────────────────────
+	"cache.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "context",
+			label: "Prompt Caching",
+			description: "Enable provider-specific prompt caching optimization",
+		},
+	},
+
+	"cache.toolSorting": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "context",
+			label: "Tool Sorting",
+			description: "Sort tools alphabetically for stable prefix-cache hits",
+		},
+	},
+
 	// Branch summaries
 	"branchSummary.enabled": {
 		type: "boolean",
@@ -1721,6 +1783,20 @@ export interface BashInterceptorRule {
 	allowSubcommands?: string[];
 }
 
+export interface ContextPruningSettings {
+	enabled: boolean;
+	deduplication: { enabled: boolean };
+	purgeErrors: { enabled: boolean; turnDelay: number };
+	supersedeWrites: { enabled: boolean };
+	protectedTools: string[];
+	protectedFilePatterns: string[];
+}
+
+export interface CacheSettings {
+	enabled: boolean;
+	toolSorting: boolean;
+}
+
 /** Map group prefix -> typed settings interface */
 export interface GroupTypeMap {
 	compaction: CompactionSettings;
@@ -1736,6 +1812,8 @@ export interface GroupTypeMap {
 	thinkingBudgets: ThinkingBudgetsSettings;
 	stt: SttSettings;
 	modelRoles: Record<string, string>;
+	contextPruning: ContextPruningSettings;
+	cache: CacheSettings;
 }
 
 export type GroupPrefix = keyof GroupTypeMap;

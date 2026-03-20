@@ -10,6 +10,7 @@ import type {
 import { $env, abortableSleep, isEnoent } from "@oh-my-pi/pi-utils";
 import { mapEffortToAnthropicAdaptiveEffort } from "../model-thinking";
 import { calculateCost } from "../models";
+import { getProviderConfig } from "../provider-config";
 import { getEnvApiKey, OUTPUT_FALLBACK_BUFFER } from "../stream";
 import type {
 	Api,
@@ -1272,6 +1273,7 @@ function buildParams(
 	options?: AnthropicOptions,
 ): MessageCreateParamsStreaming {
 	const { cacheControl } = getCacheControl(baseUrl, options?.cacheRetention);
+	const providerConfig = getProviderConfig(model.provider, model.id);
 	const params: AnthropicSamplingParams = {
 		model: model.id,
 		messages: convertAnthropicMessages(context.messages, model, isOAuthToken),
@@ -1291,6 +1293,12 @@ function buildParams(
 
 	if (context.tools) {
 		params.tools = convertTools(context.tools, isOAuthToken);
+		// Sort tools alphabetically for stable prefix-cache hits on automatic-prefix providers
+		// that proxy through Anthropic (e.g. GitHub Copilot). Sorting is a no-op for direct
+		// Anthropic where caching is breakpoint-based and tool order is stable by convention.
+		if (providerConfig.promptOrder.sortTools && params.tools.length > 1) {
+			params.tools = [...params.tools].sort((a, b) => a.name.localeCompare(b.name));
+		}
 	}
 
 	if (options?.thinkingEnabled && model.reasoning) {
@@ -1347,7 +1355,7 @@ function buildParams(
 	disableThinkingIfToolChoiceForced(params);
 	ensureMaxTokensForThinking(params, model);
 	applyPromptCaching(params, cacheControl);
-	enforceCacheControlLimit(params, 4);
+	enforceCacheControlLimit(params, providerConfig.cache.maxBreakpoints);
 	normalizeCacheControlTtlOrdering(params);
 
 	return params;

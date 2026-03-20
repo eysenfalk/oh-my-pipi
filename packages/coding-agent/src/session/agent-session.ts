@@ -131,6 +131,7 @@ import {
 	shouldCompact,
 } from "./compaction";
 import { DEFAULT_PRUNE_CONFIG, pruneToolOutputs } from "./compaction/pruning";
+import { applyContextPruning, type ContextPruningConfig, createPruneState, type PruneState } from "./context-pruning";
 import {
 	type BashExecutionMessage,
 	type BranchSummaryMessage,
@@ -418,6 +419,7 @@ export class AgentSession {
 	// Tool registry and prompt builder for extensions
 	#toolRegistry: Map<string, AgentTool>;
 	#transformContext: (messages: AgentMessage[], signal?: AbortSignal) => AgentMessage[] | Promise<AgentMessage[]>;
+	#pruneState: PruneState = createPruneState();
 	#onPayload: SimpleStreamOptions["onPayload"] | undefined;
 	#convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 	#rebuildSystemPrompt: ((toolNames: string[], tools: Map<string, AgentTool>) => Promise<string>) | undefined;
@@ -470,7 +472,11 @@ export class AgentSession {
 		this.#skillsSettings = config.skillsSettings;
 		this.#modelRegistry = config.modelRegistry;
 		this.#toolRegistry = config.toolRegistry ?? new Map();
-		this.#transformContext = config.transformContext ?? (messages => messages);
+		const baseTransform = config.transformContext ?? ((messages: AgentMessage[]) => messages);
+		this.#transformContext = async (messages: AgentMessage[], signal?: AbortSignal) => {
+			const transformed = await baseTransform(messages, signal);
+			return applyContextPruning(transformed, this.#pruneState, this.#getPruningConfig());
+		};
 		this.#onPayload = config.onPayload;
 		this.#convertToLlm = config.convertToLlm ?? convertToLlm;
 		this.#rebuildSystemPrompt = config.rebuildSystemPrompt;
@@ -518,6 +524,28 @@ export class AgentSession {
 		// Always subscribe to agent events for internal handling
 		// (session persistence, hooks, auto-compaction, retry logic)
 		this.#unsubscribeAgent = this.agent.subscribe(this.#handleAgentEvent);
+	}
+
+	/** Build the context pruning config from current settings. */
+	#getPruningConfig(): ContextPruningConfig {
+		const protectedTools = this.settings.get("contextPruning.protectedTools") as string[];
+		return {
+			enabled: this.settings.get("contextPruning.enabled"),
+			deduplication: {
+				enabled: this.settings.get("contextPruning.deduplication.enabled"),
+				protectedTools,
+			},
+			purgeErrors: {
+				enabled: this.settings.get("contextPruning.purgeErrors.enabled"),
+				turnDelay: this.settings.get("contextPruning.purgeErrors.turnDelay"),
+				protectedTools,
+			},
+			supersedeWrites: {
+				enabled: this.settings.get("contextPruning.supersedeWrites.enabled"),
+			},
+			protectedTools,
+			protectedFilePatterns: this.settings.get("contextPruning.protectedFilePatterns") as string[],
+		};
 	}
 
 	/** Model registry for API key resolution and model discovery */

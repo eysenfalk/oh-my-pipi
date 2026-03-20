@@ -6,6 +6,7 @@ export * from "./model-cache";
 export * from "./model-manager";
 export * from "./model-thinking";
 export * from "./models";
+export * from "./provider-config";
 export * from "./provider-details";
 export * from "./provider-models";
 export * from "./providers/anthropic";

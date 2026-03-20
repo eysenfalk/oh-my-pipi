@@ -24,6 +24,7 @@ import { BrowserTool } from "./browser";
 import { CalculatorTool } from "./calculator";
 import { CancelJobTool } from "./cancel-job";
 import { type CheckpointState, CheckpointTool, RewindTool } from "./checkpoint";
+import { CompressTool } from "./compress";
 import { ExitPlanModeTool } from "./exit-plan-mode";
 import { FetchTool } from "./fetch";
 import { FindTool } from "./find";
@@ -60,6 +61,7 @@ export * from "./browser";
 export * from "./calculator";
 export * from "./cancel-job";
 export * from "./checkpoint";
+export * from "./compress";
 export * from "./exit-plan-mode";
 export * from "./fetch";
 export * from "./find";
@@ -199,6 +201,7 @@ export const BUILTIN_TOOLS: Record<string, ToolFactory> = {
 	web_search: s => new SearchTool(s),
 	search_tool_bm25: SearchToolBm25Tool.createIf,
 	write: s => new WriteTool(s),
+	compress: s => new CompressTool(s),
 };
 
 export const HIDDEN_TOOLS: Record<string, ToolFactory> = {

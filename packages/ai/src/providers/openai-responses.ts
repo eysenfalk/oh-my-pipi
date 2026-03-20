@@ -5,6 +5,7 @@ import type {
 	ResponseCreateParamsStreaming,
 	ResponseInput,
 } from "openai/resources/responses/responses";
+import { getProviderConfig } from "../provider-config";
 import { getEnvApiKey } from "../stream";
 import {
 	type Api,
@@ -301,6 +302,16 @@ function buildParams(
 
 	if (context.tools) {
 		params.tools = convertTools(context.tools, supportsStrictMode(model));
+		const providerConfig = getProviderConfig(model.provider, model.id);
+		if (providerConfig.promptOrder.sortTools && params.tools.length > 1) {
+			params.tools = [...params.tools].sort((a, b) => {
+				// All items from convertTools are standard function tools; ApplyPatchTool and other
+				// built-in tool types are a type-system union that never appears at runtime here.
+				const nameA = (a as { name?: string }).name ?? "";
+				const nameB = (b as { name?: string }).name ?? "";
+				return nameA.localeCompare(nameB);
+			});
+		}
 		if (options?.toolChoice) {
 			params.tool_choice = mapToOpenAIResponsesToolChoice(options.toolChoice);
 		}

@@ -2,6 +2,7 @@ import { getOAuthProviders } from "@oh-my-pi/pi-ai";
 import type { SettingPath, SettingValue } from "../config/settings";
 import { settings } from "../config/settings";
 import type { InteractiveModeContext } from "../modes/types";
+import { handleDcpContext, handleDcpStats, handleDcpSweep } from "./dcp";
 
 function refreshStatusLine(ctx: InteractiveModeContext): void {
 	ctx.statusLine.invalidate();
@@ -541,6 +542,33 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<BuiltinSlashCommandSpec> = [
 		name: "exit",
 		description: "Exit the application",
 		handle: shutdownHandler,
+	},
+	{
+		name: "dcp",
+		description: "Context pruning commands",
+		subcommands: [
+			{ name: "stats", description: "Show pruning statistics" },
+			{ name: "context", description: "Show context usage breakdown" },
+			{ name: "sweep", description: "Manually sweep old tool outputs" },
+		],
+		allowArgs: true,
+		handle: (command, runtime) => {
+			const [subcommand, ...rest] = command.args.trim().split(/\s+/);
+			const subArgs = rest.join(" ");
+			switch (subcommand) {
+				case "stats":
+					handleDcpStats(subArgs, runtime);
+					break;
+				case "context":
+					handleDcpContext(subArgs, runtime);
+					break;
+				case "sweep":
+					handleDcpSweep(subArgs, runtime);
+					break;
+				default:
+					handleDcpStats("", runtime);
+			}
+		},
 	},
 	{
 		name: "quit",
