@@ -1517,6 +1517,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		asyncJobManager,
 		pendingActionStore,
 	});
+	agent.transformContext = session.getContextTransform();
 
 	if (model?.api === "openai-codex-responses") {
 		try {

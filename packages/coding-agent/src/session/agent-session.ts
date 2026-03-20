@@ -2018,6 +2018,19 @@ export class AgentSession {
 		this.#pruneState.compressions.push(record);
 	}
 
+	/**
+	 * Returns the full pre-LLM message transform pipeline for this session:
+	 * extension context transforms (if any) followed by applyContextPruning.
+	 *
+	 * The SDK sets this as Agent.transformContext after constructing both so that
+	 * applyContextPruning runs on every LLM call in the main agent loop.
+	 */
+	getContextTransform(): (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]> {
+		// The constructor always assigns an async wrapper, so the return is always
+		// Promise<AgentMessage[]> even though the field allows AgentMessage[] | Promise.
+		return this.#transformContext as (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
+	}
+
 	/** Current session file path, or undefined if sessions are disabled */
 	get sessionFile(): string | undefined {
 		return this.sessionManager.getSessionFile();

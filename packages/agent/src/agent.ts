@@ -397,6 +397,21 @@ export class Agent {
 		this.#maxRetryDelayMs = value;
 	}
 
+	/**
+	 * Get/set the pre-LLM message transform pipeline.
+	 * AgentSession sets this after construction to wire applyContextPruning
+	 * (and any extension context transforms) into the main agent loop.
+	 */
+	get transformContext(): ((messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>) | undefined {
+		return this.#transformContext;
+	}
+
+	set transformContext(value:
+		| ((messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>)
+		| undefined) {
+		this.#transformContext = value;
+	}
+
 	get state(): AgentState {
 		return this.#state;
 	}

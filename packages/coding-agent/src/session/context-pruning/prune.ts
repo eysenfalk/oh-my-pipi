@@ -74,9 +74,20 @@ export function applyCompressions(messages: AgentMessage[], state: PruneState): 
 		for (const id of record.coveredIds) allCoveredCallIds.add(id);
 	}
 	if (allCoveredCallIds.size === 0) return messages;
-
-	// Remove covered IDs from pruneMap to avoid double-processing
-	for (const id of allCoveredCallIds) state.pruneMap.delete(id);
+	// Remove covered IDs from pruneMap to avoid double-processing in applyPruneOperations.
+	// Track token savings only for IDs that were NOT already in pruneMap — those are already
+	// counted in state.stats.tokensSaved (computed from pruneMap before this function runs).
+	let compressionTokens = 0;
+	let compressionCount = 0;
+	for (const id of allCoveredCallIds) {
+		if (!state.pruneMap.has(id)) {
+			compressionTokens += state.toolMetadata.get(id)?.tokenCount ?? 0;
+			compressionCount++;
+		}
+		state.pruneMap.delete(id);
+	}
+	state.stats.tokensSaved += compressionTokens;
+	state.stats.toolsPruned += compressionCount;
 
 	// Map toolCallId → which compression covers it (for summary injection)
 	const callIdToRecord = new Map<string, CompressRecord>();

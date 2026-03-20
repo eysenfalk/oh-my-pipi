@@ -43,13 +43,16 @@ export class CompressTool implements AgentTool<typeof compressSchema, void> {
 		{ topic, summary }: CompressParams,
 		_signal?: AbortSignal,
 	): Promise<AgentToolResult<void>> {
-		const stats = this.#session.getPruningStats?.();
-		const currentTurn = stats?.currentTurn ?? 0;
-
+		// upToTurn = MAX_SAFE_INTEGER covers all tool calls that exist at call time.
+		// Using the live turn count from getPruningStats() was wrong: it is 0 when
+		// the session hasn't gone through a full transformContext yet, causing the
+		// compression to cover nothing.  The compress intent is always
+		// "summarise everything I've seen so far" — a sentinel that means "all"
+		// is both correct and future-proof.
 		const record: CompressRecord = {
 			topic,
 			summary,
-			upToTurn: currentTurn,
+			upToTurn: Number.MAX_SAFE_INTEGER,
 			applied: false,
 			coveredIds: [],
 		};
@@ -60,7 +63,7 @@ export class CompressTool implements AgentTool<typeof compressSchema, void> {
 			content: [
 				{
 					type: "text",
-					text: `Compressed context up to turn ${currentTurn}: "${topic}". Summary recorded; covered tool calls will be hidden from context.`,
+					text: `Compressed context: "${topic}". Summary recorded; all existing tool calls will be hidden from context.`,
 				},
 			],
 		};
