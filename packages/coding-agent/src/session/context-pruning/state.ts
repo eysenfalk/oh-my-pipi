@@ -4,7 +4,7 @@
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { ToolResultMessage } from "@oh-my-pi/pi-ai";
 // Rough 4-chars-per-token approximation. Avoids importing compaction which pulls in heavy deps.
-import type { PruneState, ToolCallMetadata } from "./types";
+import type { CompressRecord, PruneState, ToolCallMetadata } from "./types";
 
 /** Create a fresh empty PruneState */
 export function createPruneState(): PruneState {
@@ -13,6 +13,7 @@ export function createPruneState(): PruneState {
 		toolIdList: [],
 		pruneMap: new Map(),
 		currentTurn: 0,
+		strategiesDirty: true,
 		compressions: [],
 		stats: { tokensSaved: 0, toolsPruned: 0, currentTurn: 0, compressions: 0 },
 	};
@@ -98,4 +99,27 @@ export function syncStateFromMessages(state: PruneState, messages: AgentMessage[
 			state.toolIdList.push(...knownInOrder);
 		}
 	}
+}
+
+/**
+ * Serialize the pruning marks (pruneMap + compressions) to a JSON string
+ * for persistence in a sidecar file alongside the session JSONL.
+ * Does not include transient state (toolMetadata, toolIdList, stats).
+ */
+export function serializePruneMarks(state: PruneState): string {
+	return JSON.stringify({
+		pruneMap: Array.from(state.pruneMap.entries()),
+		compressions: state.compressions,
+	});
+}
+
+/**
+ * Restore pruning marks from a sidecar JSON string into `state`.
+ * Sets `strategiesDirty = false` so strategies don't re-run unnecessarily.
+ */
+export function deserializePruneMarks(state: PruneState, json: string): void {
+	const data = JSON.parse(json) as { pruneMap: Array<[string, number]>; compressions: CompressRecord[] };
+	state.pruneMap = new Map(data.pruneMap);
+	state.compressions = data.compressions ?? [];
+	state.strategiesDirty = false;
 }

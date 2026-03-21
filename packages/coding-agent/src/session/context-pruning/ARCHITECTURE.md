@@ -21,7 +21,7 @@ User calls session.prompt("...")
        │         ├─ extensionRunner?.emitContext  ← optional extension hook
        │         └─ applyContextPruning           ← THIS MODULE
        │              ├─ syncStateFromMessages    ← discover tool calls, compute turns
-       │              ├─ strategies               ← deduplication, purgeErrors, supersedeWrites
+       │              ├─ strategies (if dirty)    ← deduplication, purgeErrors, supersedeWrites
        │              ├─ applyPruneOperations      ← replace arguments with "[pruned]" notice
        │              └─ applyCompressions         ← remove covered tool calls, inject summaries
        ├─ config.convertToLlm(messages)           ← AgentMessage[] → Message[]
@@ -54,8 +54,8 @@ wiring.
 ## Pruning Strategies
 
 ### Deduplication
-Marks duplicate tool calls (same name + same arguments) for pruning. The first
-occurrence is kept; subsequent duplicates have their arguments replaced with a
+Marks duplicate non-protected tool calls (same name + same arguments) for pruning.
+The first occurrence is kept; subsequent duplicates have their arguments replaced with a
 "[pruned]" notice. Protected tools (read, write, edit, etc.) are excluded.
 
 ### Purge Errors
@@ -65,6 +65,18 @@ the pruned notice. The error result stays visible so the LLM knows what failed.
 ### Supersede Writes
 When the same file is written/edited multiple times, keeps only the latest write
 and prunes earlier ones.
+
+### Strategy execution: dirty flag
+Strategies run **only when `state.strategiesDirty` is true**. The flag is:
+- `true` on fresh sessions (first compress call will trigger strategies)
+- Set `true` by `addCompressionRecord` (compress tool fired)
+- Set `true` by `sweepContextPruning` (explicit user sweep)
+- Cleared to `false` inside `applyContextPruning` after strategies run
+
+This preserves prompt cache prefix stability between compress invocations: the
+serialized prefix is byte-identical across turns, so the provider cache hits.
+OpenCode DCP (the reference implementation) measures 85% cache hit rate with this
+approach vs 90% without DCP — a controlled 5% tradeoff.
 
 ### applyPruneOperations
 Walks through all assistant messages and replaces the `arguments` field of pruned
@@ -225,3 +237,47 @@ separately by `applyCompressions`. IDs covered by compression are deleted from
 the pruneMap, so they don't get double-counted. This works correctly but is
 subtle — modifying the stats computation without understanding both paths will
 break the accounting.
+
+
+## Prune Mark Persistence
+
+Pruning decisions (the `pruneMap` and `compressions` array) are persisted to a sidecar
+file alongside the session JSONL file:
+
+```
+<sessionFile>.jsonl          ← conversation messages
+<sessionFile>.prune.json     ← pruneMap + compressions (sidecar)
+```
+
+**Write path**: After strategies run in `applyContextPruning` (dirty flag transitions
+`true → false`), `AgentSession.#transformContext` fire-and-forgets `#savePruneMarks()`.
+Same after `sweepContextPruning()`.
+
+**Read path**: `AgentSession.#transformContext` lazy-loads the sidecar on the very first
+call for a session (guarded by `#pruneStateLoaded`). If the file doesn't exist (new session),
+strategies will run on the first compress invocation as normal.
+
+**Why this matters for cache**: Between compress invocations, `strategiesDirty` is `false`
+and the pruneMap doesn't change. The serialized prefix is byte-identical on every turn
+→ Anthropic prefix cache hits. Strategies only re-evaluate at compress time, which already
+invalidates the prefix anyway (a new compression record changes the message structure).
+
+**Sidecar format**:
+```json
+{
+  "pruneMap": [["toolCallId1", 1234], ["toolCallId2", 567]],
+  "compressions": [
+    { "topic": "...", "summary": "...", "upToTurn": 9007199254740991, "applied": true, "coveredIds": [...] }
+  ]
+}
+```
+
+**If the sidecar is absent or unreadable** (ENOENT is silently ignored; other errors are
+warned but not fatal): `strategiesDirty` stays `true` from `createPruneState()`, so
+strategies run on the next compress invocation and write a fresh sidecar. No data loss.
+
+### 6. Sidecar/session file mismatch
+If a session file is copied or its path changes, the `.prune.json` sidecar travels with it
+automatically (same stem, same directory). If only the sidecar is lost, strategies re-run
+on next compress and reconstruct it. If only the session is lost, the sidecar is orphaned
+but harmless (never loaded since there's no matching session path).

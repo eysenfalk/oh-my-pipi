@@ -92,6 +92,13 @@ export interface PruneState {
 	pruneMap: Map<string, number>;
 	currentTurn: number;
 	stats: PruningStats;
+	/**
+	 * When true, pruning strategies (dedup/purge-errors/supersede-writes) will run
+	 * on the next transformContext call. Set true on fresh sessions and when
+	 * compress fires. Cleared after strategies run. Persisted to sidecar file so
+	 * reloaded sessions don't re-run strategies unnecessarily.
+	 */
+	strategiesDirty: boolean;
 	/** Registered compression blocks from the compress tool */
 	compressions: CompressRecord[];
 }

@@ -131,7 +131,14 @@ import {
 	shouldCompact,
 } from "./compaction";
 import { DEFAULT_PRUNE_CONFIG, pruneToolOutputs } from "./compaction/pruning";
-import { applyContextPruning, type ContextPruningConfig, createPruneState, type PruneState } from "./context-pruning";
+import {
+	applyContextPruning,
+	type ContextPruningConfig,
+	createPruneState,
+	deserializePruneMarks,
+	type PruneState,
+	serializePruneMarks,
+} from "./context-pruning";
 import type { CompressRecord, PruningStats } from "./context-pruning/types";
 import {
 	type BashExecutionMessage,
@@ -422,6 +429,7 @@ export class AgentSession {
 	#transformContext: (messages: AgentMessage[], signal?: AbortSignal) => AgentMessage[] | Promise<AgentMessage[]>;
 	#pruneState: PruneState = createPruneState();
 	#lastPruneMapSize = 0;
+	#pruneStateLoaded = false;
 	#onPayload: SimpleStreamOptions["onPayload"] | undefined;
 	#convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 	#rebuildSystemPrompt: ((toolNames: string[], tools: Map<string, AgentTool>) => Promise<string>) | undefined;
@@ -476,7 +484,15 @@ export class AgentSession {
 		this.#toolRegistry = config.toolRegistry ?? new Map();
 		const baseTransform = config.transformContext ?? ((messages: AgentMessage[]) => messages);
 		this.#transformContext = async (messages: AgentMessage[], signal?: AbortSignal) => {
+			// Lazy-load persisted prune marks on first call for this session.
+			// This restores the pruneMap from the sidecar file so strategies don't
+			// re-run from scratch, preserving cache prefix stability.
+			if (!this.#pruneStateLoaded) {
+				await this.#loadPruneMarks();
+				this.#pruneStateLoaded = true;
+			}
 			const transformed = await baseTransform(messages, signal);
+			const wasDirty = this.#pruneState.strategiesDirty;
 			const result = applyContextPruning(transformed, this.#pruneState, this.#getPruningConfig());
 			// Notify when new items are pruned
 			const newPruneSize = this.#pruneState.pruneMap.size;
@@ -491,6 +507,11 @@ export class AgentSession {
 					{ pruned: newCount, tokensSaved: saved },
 					"agent",
 				);
+			}
+			// Persist updated marks if strategies just ran (dirty flag cleared by applyContextPruning).
+			// Fire-and-forget: sidecar write must not hold up the LLM call.
+			if (wasDirty && !this.#pruneState.strategiesDirty) {
+				this.#savePruneMarks().catch(err => logger.warn("Prune mark save failed", { error: err }));
 			}
 			return result;
 		};
@@ -2005,17 +2026,49 @@ export class AgentSession {
 		};
 	}
 
+	#pruneSidecarPath(): string | undefined {
+		const f = this.sessionManager.getSessionFile();
+		return f ? f.replace(/\.jsonl$/, ".prune.json") : undefined;
+	}
+
+	async #loadPruneMarks(): Promise<void> {
+		const p = this.#pruneSidecarPath();
+		if (!p) return;
+		try {
+			const json = await Bun.file(p).text();
+			deserializePruneMarks(this.#pruneState, json);
+		} catch (err) {
+			if (!isEnoent(err)) logger.warn("Failed to load prune marks", { path: p, error: err });
+		}
+	}
+
+	async #savePruneMarks(): Promise<void> {
+		const p = this.#pruneSidecarPath();
+		if (!p) return;
+		try {
+			await Bun.write(p, serializePruneMarks(this.#pruneState));
+		} catch (err) {
+			logger.warn("Failed to save prune marks", { path: p, error: err });
+		}
+	}
+
 	/** Force a pruning pass on the current message list and return updated stats. */
 	sweepContextPruning(): PruningStats {
+		// Force strategy re-evaluation regardless of dirty flag (explicit sweep).
+		this.#pruneState.strategiesDirty = true;
 		const messages = this.agent.state.messages;
 		applyContextPruning(messages, this.#pruneState, this.#getPruningConfig());
 		this.#lastPruneMapSize = this.#pruneState.pruneMap.size;
+		this.#savePruneMarks().catch(err => logger.warn("Prune mark save failed after sweep", { error: err }));
 		return this.getPruningStats();
 	}
 
 	/** Register a compression record from the compress tool. */
 	addCompressionRecord(record: CompressRecord): void {
 		this.#pruneState.compressions.push(record);
+		// Mark strategies dirty so they re-evaluate on the next transformContext call.
+		// This is the only non-sweep trigger for strategy recalculation.
+		this.#pruneState.strategiesDirty = true;
 	}
 
 	/**
