@@ -208,11 +208,12 @@ const tokenOutSegment: StatusLineSegment = {
 const tokenTotalSegment: StatusLineSegment = {
 	id: "token_total",
 	render(ctx) {
-		const { input, output, cacheRead, cacheWrite } = ctx.usageStats;
+		const { input, output, cacheRead, cacheWrite, hitRate } = ctx.usageStats;
 		const total = input + output + cacheRead + cacheWrite;
 		if (!total) return { content: "", visible: false };
 
-		const content = withIcon(theme.icon.tokens, formatNumber(total));
+		let content = withIcon(theme.icon.tokens, formatNumber(total));
+		if (hitRate !== null) content += ` ~${Math.round(hitRate * 100)}%`;
 		return { content: theme.fg("statusLineSpend", content), visible: true };
 	},
 };

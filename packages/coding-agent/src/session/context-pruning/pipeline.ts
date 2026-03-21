@@ -30,10 +30,15 @@ export function applyContextPruning(
 
 	const sizeBefore = state.pruneMap.size;
 
-	// Run strategies in order (dedup → purge-errors → supersede-writes)
-	deduplication(state, config);
-	purgeErrors(state, config);
-	supersedeWrites(state, config);
+	// Run strategies only when dirty (compress fired, sweep called, or fresh session).
+	// This preserves prefix cache stability between compress invocations: the pruneMap
+	// is stable across turns, so the serialized prefix is byte-identical → cache hits.
+	if (state.strategiesDirty) {
+		deduplication(state, config);
+		purgeErrors(state, config);
+		supersedeWrites(state, config);
+		state.strategiesDirty = false;
+	}
 
 	// If no new prune operations and no compressions, return unchanged
 	if (state.pruneMap.size === sizeBefore && state.compressions.length === 0) return messages;

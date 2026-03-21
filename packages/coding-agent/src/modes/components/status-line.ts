@@ -351,9 +351,11 @@ export class StatusLineComponent implements Component {
 			premiumRequests: 0,
 			cost: 0,
 		};
+		const cacheDenominator = aggregateUsageStats.input + aggregateUsageStats.cacheRead + aggregateUsageStats.cacheWrite;
 		const usageStats = {
 			...aggregateUsageStats,
 			tokensPerSecond: this.#getTokensPerSecond(),
+			hitRate: cacheDenominator > 1024 ? aggregateUsageStats.cacheRead / cacheDenominator : null,
 		};
 
 		// Get context percentage

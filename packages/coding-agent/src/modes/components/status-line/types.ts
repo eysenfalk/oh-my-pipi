@@ -33,6 +33,7 @@ export interface SegmentContext {
 		premiumRequests: number;
 		cost: number;
 		tokensPerSecond: number | null;
+		hitRate: number | null;
 	};
 	contextPercent: number;
 	contextWindow: number;
