@@ -91,6 +91,16 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<BuiltinSlashCommandSpec> = [
 		},
 	},
 	{
+		name: "auto",
+		description: "Toggle auto mode (agent plans then executes autonomously)",
+		inlineHint: "[prompt]",
+		allowArgs: true,
+		handle: async (command, runtime) => {
+			await runtime.ctx.handleAutoModeCommand(command.args || undefined);
+			runtime.ctx.editor.setText("");
+		},
+	},
+	{
 		name: "model",
 		aliases: ["models"],
 		description: "Select model (opens selector UI)",

@@ -1,7 +1,6 @@
 Run the plan review workflow on `local://PLAN.md`. Your goal is to produce a plan that is ready for real implementation — no wrong assumptions, no over-engineering, no missing steps.
 
 **Workflow (repeat up to 3 iterations):**
-
 1. Read the full plan: `read` tool on `local://PLAN.md`
 2. Spawn a `critic` agent via the `task` tool. In the context, include the complete plan text verbatim. The critic will evaluate it from red-team, pragmatic, and staff engineer perspectives and return a `verdict`, `issues`, and `suggested_revisions`.
 3. If `verdict` is `needs_revision`:

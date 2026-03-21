@@ -12,6 +12,7 @@ import * as typebox from "@sinclair/typebox";
 import { getConfigDirs } from "../../config";
 import { execCommand } from "../../exec/exec";
 import { ReviewCommand } from "./bundled/review";
+import { WorkflowCommand } from "./bundled/workflow";
 import type {
 	CustomCommand,
 	CustomCommandAPI,
@@ -152,6 +153,13 @@ function loadBundledCommands(sharedApi: CustomCommandAPI): LoadedCustomCommand[]
 		path: "bundled:review",
 		resolvedPath: "bundled:review",
 		command: new ReviewCommand(sharedApi),
+		source: "bundled",
+	});
+
+	bundled.push({
+		path: "bundled:workflow",
+		resolvedPath: "bundled:workflow",
+		command: new WorkflowCommand(),
 		source: "bundled",
 	});
 

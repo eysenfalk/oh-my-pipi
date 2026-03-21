@@ -93,6 +93,14 @@ You **MUST** ask questions throughout. You **MUST NOT** make large assumptions a
 </caution>
 {{/if}}
 
+{{#if autoMode}}
+## Auto Mode
+
+Auto mode is active. After the user approves this planning phase, you will autonomously execute the remaining workflow phases.
+Read `skill://workflow/SKILL.md` for the phase sequence and `skill://agent-orchestration/SKILL.md` for execution patterns.
+Each autonomous phase uses critic review (max 3 iterations). If any phase fails after max retries, stop and report.
+{{/if}}
+
 <directives>
 - You **MUST** use `{{askToolName}}` only for clarifying requirements or choosing approaches
 </directives>
