@@ -12,6 +12,7 @@ import {
 } from "@oh-my-pi/pi-tui";
 import { theme } from "../../modes/theme/theme";
 import type { SessionInfo } from "../../session/session-manager";
+import { shortenPath } from "../../tools/render-utils";
 import { fuzzyFilter } from "../../utils/fuzzy";
 import { DynamicBorder } from "./dynamic-border";
 import { HookSelectorComponent } from "./hook-selector";
@@ -20,6 +21,8 @@ import { HookSelectorComponent } from "./hook-selector";
  * Custom session list component with multi-line items and search
  */
 class SessionList implements Component {
+	#allSessions: SessionInfo[];
+	#showCwd: boolean;
 	#filteredSessions: SessionInfo[] = [];
 	#selectedIndex: number = 0;
 	readonly #searchInput: Input;
@@ -29,12 +32,12 @@ class SessionList implements Component {
 	#maxVisible: number = 5; // Max sessions visible (each session is 3 lines: msg + metadata + blank)
 
 	onDeleteRequest?: (session: SessionInfo) => void;
+	onToggleScope?: () => void;
 
-	constructor(
-		private readonly allSessions: SessionInfo[],
-		private readonly showCwd = false,
-	) {
-		this.#filteredSessions = allSessions;
+	constructor(sessions: SessionInfo[], showCwd = false) {
+		this.#allSessions = sessions;
+		this.#showCwd = showCwd;
+		this.#filteredSessions = sessions;
 		this.#searchInput = new Input();
 
 		// Handle Enter in search input - select current item
@@ -49,7 +52,7 @@ class SessionList implements Component {
 	}
 
 	#filterSessions(query: string): void {
-		this.#filteredSessions = fuzzyFilter(this.allSessions, query, session => {
+		this.#filteredSessions = fuzzyFilter(this.#allSessions, query, session => {
 			const parts = [
 				session.id,
 				session.title ?? "",
@@ -64,9 +67,9 @@ class SessionList implements Component {
 	}
 
 	removeSession(sessionPath: string): void {
-		const index = this.allSessions.findIndex(s => s.path === sessionPath);
+		const index = this.#allSessions.findIndex(s => s.path === sessionPath);
 		if (index === -1) return;
-		this.allSessions.splice(index, 1);
+		this.#allSessions.splice(index, 1);
 		// Re-filter to update filteredSessions
 		this.#filterSessions(this.#searchInput.getValue());
 		// Adjust selectedIndex if we deleted the last item or beyond
@@ -79,6 +82,13 @@ class SessionList implements Component {
 		// No cached state to invalidate currently
 	}
 
+	setSessions(sessions: SessionInfo[], showCwd: boolean): void {
+		this.#allSessions = sessions;
+		this.#showCwd = showCwd;
+		this.#filterSessions(this.#searchInput.getValue());
+		this.#selectedIndex = 0;
+	}
+
 	render(width: number): string[] {
 		const lines: string[] = [];
 
@@ -87,7 +97,7 @@ class SessionList implements Component {
 		lines.push(""); // Blank line after search
 
 		if (this.#filteredSessions.length === 0) {
-			if (this.showCwd) {
+			if (this.#showCwd) {
 				// "All" scope - no sessions anywhere that match filter
 				lines.push(truncateToWidth(theme.fg("muted", "  No sessions found"), width));
 			} else {
@@ -156,10 +166,11 @@ class SessionList implements Component {
 				lines.push(messageLine);
 			}
 
-			// Metadata line: date + message count
+			// Metadata line: date + message count + optional cwd
 			const modified = formatDate(session.modified);
 			const msgCount = `${session.messageCount} message${session.messageCount !== 1 ? "s" : ""}`;
-			const metadata = `  ${modified} ${theme.sep.dot} ${msgCount}`;
+			const cwdSuffix = this.#showCwd && session.cwd ? ` ${theme.sep.dot} ${shortenPath(session.cwd)}` : "";
+			const metadata = `  ${modified} ${theme.sep.dot} ${msgCount}${cwdSuffix}`;
 			const metadataLine = theme.fg("dim", truncateToWidth(metadata, width));
 
 			lines.push(metadataLine);
@@ -175,7 +186,8 @@ class SessionList implements Component {
 
 		// Add keybinding hint
 		lines.push("");
-		lines.push(theme.fg("muted", "  [Del to delete, Enter to select, Esc to cancel]"));
+		const tabHint = this.#showCwd ? "Tab to show current folder" : "Tab to show all";
+		lines.push(theme.fg("muted", `  [${tabHint}, Del to delete, Enter to select, Esc to cancel]`));
 
 		return lines;
 	}
@@ -190,6 +202,11 @@ class SessionList implements Component {
 			return;
 		}
 
+		// Tab - toggle scope between current folder and all sessions
+		if (matchesKey(keyData, "tab")) {
+			this.onToggleScope?.();
+			return;
+		}
 		// Up arrow
 		if (matchesKey(keyData, "up")) {
 			this.#selectedIndex = Math.max(0, this.#selectedIndex - 1);
@@ -245,6 +262,10 @@ export class SessionSelectorComponent extends Container {
 	#messageContainer: Container;
 	#onDelete?: (session: SessionInfo) => Promise<boolean>;
 	#onRequestRender?: () => void;
+	#folderSessions: SessionInfo[];
+	#showingAll = false;
+	#loadAllSessions?: () => Promise<SessionInfo[]>;
+	#scopeIndicator: Text;
 
 	constructor(
 		sessions: SessionInfo[],
@@ -252,16 +273,23 @@ export class SessionSelectorComponent extends Container {
 		onCancel: () => void,
 		onExit: () => void,
 		onDelete?: (session: SessionInfo) => Promise<boolean>,
+		loadAllSessions?: () => Promise<SessionInfo[]>,
 	) {
 		super();
 
+		this.#folderSessions = sessions;
 		this.#messageContainer = new Container();
 		this.#onDelete = onDelete;
+		this.#loadAllSessions = loadAllSessions;
 		// Add header
 		this.addChild(new Spacer(1));
 		this.addChild(new Text(theme.bold("Resume Session"), 1, 0));
 		this.addChild(new Spacer(1));
 		this.addChild(new DynamicBorder());
+		this.addChild(new Spacer(1));
+		// Scope indicator
+		this.#scopeIndicator = new Text(theme.fg("muted", "Current Folder"), 1, 0);
+		this.addChild(this.#scopeIndicator);
 		this.addChild(new Spacer(1));
 		this.addChild(this.#messageContainer);
 		// Create session list
@@ -271,6 +299,9 @@ export class SessionSelectorComponent extends Container {
 		this.#sessionList.onExit = onExit;
 		this.#sessionList.onDeleteRequest = (session: SessionInfo) => {
 			this.#showDeleteConfirmation(session);
+		};
+		this.#sessionList.onToggleScope = () => {
+			void this.#toggleScope();
 		};
 		this.addChild(this.#sessionList);
 
@@ -293,6 +324,25 @@ export class SessionSelectorComponent extends Container {
 		this.#messageContainer.addChild(new Spacer(1));
 	}
 
+	async #toggleScope(): Promise<void> {
+		if (!this.#showingAll && this.#loadAllSessions) {
+			try {
+				const allSessions = await this.#loadAllSessions();
+				this.#sessionList.setSessions(allSessions, true);
+				this.#showingAll = true;
+				this.#scopeIndicator.setText(theme.fg("muted", "All Sessions"));
+			} catch (err) {
+				this.#showError(err instanceof Error ? err.message : String(err));
+				return;
+			}
+		} else {
+			this.#sessionList.setSessions(this.#folderSessions, false);
+			this.#showingAll = false;
+			this.#scopeIndicator.setText(theme.fg("muted", "Current Folder"));
+		}
+		this.#onRequestRender?.();
+	}
+
 	#showDeleteConfirmation(session: SessionInfo): void {
 		const displayName = session.title || session.firstMessage.slice(0, 40) || session.id;
 		this.#confirmationDialog = new HookSelectorComponent(
@@ -305,6 +355,9 @@ export class SessionSelectorComponent extends Container {
 						const deleted = await this.#onDelete(session);
 						if (deleted) {
 							this.#sessionList.removeSession(session.path);
+							// Keep folderSessions in sync so toggling back stays consistent
+							const folderIdx = this.#folderSessions.findIndex(s => s.path === session.path);
+							if (folderIdx !== -1) this.#folderSessions.splice(folderIdx, 1);
 						}
 					} catch (err) {
 						this.#showError(err instanceof Error ? err.message : String(err));

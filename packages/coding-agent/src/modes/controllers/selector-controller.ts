@@ -620,6 +620,7 @@ export class SelectorController {
 						});
 					}
 				},
+				() => SessionManager.listAll(),
 			);
 			selector.setOnRequestRender(() => this.ctx.ui.requestRender());
 			return { component: selector, focus: selector };
