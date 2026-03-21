@@ -284,7 +284,15 @@ async function loadSkills(ctx: LoadContext): Promise<LoadResult<Skill>> {
 		requireDescription: true,
 	});
 
-	const results = await Promise.all([...projectScans, userScan]);
+	// Bundled skills shipped with the package
+	const bundledScan = scanSkillsFromDir(ctx, {
+		dir: path.join(import.meta.dir, "../../skills"),
+		providerId: PROVIDER_ID,
+		level: "user",
+		requireDescription: true,
+	});
+
+	const results = await Promise.all([...projectScans, userScan, bundledScan]);
 
 	return {
 		items: results.flatMap(r => r.items),

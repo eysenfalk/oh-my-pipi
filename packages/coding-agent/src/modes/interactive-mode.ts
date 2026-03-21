@@ -586,11 +586,13 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	#updatePlanModeStatus(): void {
+		const planState = this.session.getPlanModeState();
 		const status =
 			this.planModeEnabled || this.planModePaused
 				? {
 						enabled: this.planModeEnabled,
 						paused: this.planModePaused,
+						autoMode: planState?.autoMode,
 					}
 				: undefined;
 		this.statusLine.setPlanModeStatus(status);
@@ -646,7 +648,11 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 	}
 
-	async #enterPlanMode(options?: { planFilePath?: string; workflow?: "parallel" | "iterative" }): Promise<void> {
+	async #enterPlanMode(options?: {
+		planFilePath?: string;
+		workflow?: "parallel" | "iterative";
+		autoMode?: boolean;
+	}): Promise<void> {
 		if (this.planModeEnabled) {
 			return;
 		}
@@ -669,6 +675,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			planFilePath,
 			workflow: options?.workflow ?? "parallel",
 			reentry: this.#planModeHasEntered,
+			autoMode: options?.autoMode,
 		});
 		if (this.session.isStreaming) {
 			await this.session.sendPlanModeContext({ deliverAs: "steer" });
@@ -676,8 +683,9 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#planModeHasEntered = true;
 		await this.#applyPlanModeModel();
 		this.#updatePlanModeStatus();
+		const modeLabel = options?.autoMode ? "Auto" : "Plan";
 		this.sessionManager.appendModeChange("plan", { planFilePath });
-		this.showStatus(`Plan mode enabled. Plan file: ${planFilePath}`);
+		this.showStatus(`${modeLabel} mode enabled. Plan file: ${planFilePath}`);
 	}
 
 	async #exitPlanMode(options?: { silent?: boolean; paused?: boolean }): Promise<void> {
@@ -776,6 +784,22 @@ export class InteractiveMode implements InteractiveModeContext {
 			return;
 		}
 		await this.#enterPlanMode();
+		if (initialPrompt && this.onInputCallback) {
+			this.onInputCallback(this.startPendingSubmission({ text: initialPrompt }));
+		}
+	}
+
+	async handleAutoModeCommand(initialPrompt?: string): Promise<void> {
+		if (this.planModeEnabled) {
+			const confirmed = await this.showHookConfirm(
+				"Exit auto mode?",
+				"This exits auto mode without approving a plan.",
+			);
+			if (!confirmed) return;
+			await this.#exitPlanMode({ paused: true });
+			return;
+		}
+		await this.#enterPlanMode({ autoMode: true });
 		if (initialPrompt && this.onInputCallback) {
 			this.onInputCallback(this.startPendingSubmission({ text: initialPrompt }));
 		}

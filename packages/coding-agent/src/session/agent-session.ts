@@ -2198,6 +2198,7 @@ export class AgentSession {
 			exitToolName: "exit_plan_mode",
 			reentry: state.reentry ?? false,
 			iterative: state.workflow === "iterative",
+			autoMode: state.autoMode ?? false,
 		});
 
 		return {
