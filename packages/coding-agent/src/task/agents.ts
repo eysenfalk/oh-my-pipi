@@ -11,10 +11,13 @@ import designerMd from "../prompts/agents/designer.md" with { type: "text" };
 import exploreMd from "../prompts/agents/explore.md" with { type: "text" };
 // Embed agent markdown files at build time
 import agentFrontmatterTemplate from "../prompts/agents/frontmatter.md" with { type: "text" };
+import juniorTaskMd from "../prompts/agents/junior_task.md" with { type: "text" };
 import librarianMd from "../prompts/agents/librarian.md" with { type: "text" };
+import midTaskMd from "../prompts/agents/mid_task.md" with { type: "text" };
 import oracleMd from "../prompts/agents/oracle.md" with { type: "text" };
 import planMd from "../prompts/agents/plan.md" with { type: "text" };
 import reviewerMd from "../prompts/agents/reviewer.md" with { type: "text" };
+import seniorTaskMd from "../prompts/agents/senior_task.md" with { type: "text" };
 import taskMd from "../prompts/agents/task.md" with { type: "text" };
 import { parseFrontmatter } from "../utils/frontmatter";
 import type { AgentDefinition, AgentSource } from "./types";
@@ -69,6 +72,41 @@ const EMBEDDED_AGENT_DEFS: EmbeddedAgentDef[] = [
 			thinkingLevel: Effort.Minimal,
 		},
 		template: taskMd,
+	},
+	{
+		fileName: "senior_task.md",
+		frontmatter: {
+			name: "senior_task",
+			description:
+				"High-capability agent for complex refactors, architecture-sensitive changes, or correctness-critical work. Uses strongest available model.",
+			spawns: "*",
+			model: "pi/senior",
+			thinkingLevel: Effort.High,
+		},
+		template: seniorTaskMd,
+	},
+	{
+		fileName: "mid_task.md",
+		frontmatter: {
+			name: "mid_task",
+			description:
+				"Balanced implementation agent for standard feature work and multi-file changes at moderate cost.",
+			spawns: "explore",
+			model: "pi/mid",
+			thinkingLevel: Effort.Medium,
+		},
+		template: midTaskMd,
+	},
+	{
+		fileName: "junior_task.md",
+		frontmatter: {
+			name: "junior_task",
+			description:
+				"Budget agent for high-volume, well-scoped mechanical changes (renames, pattern application, boilerplate). Uses cheapest model.",
+			model: "pi/junior",
+			thinkingLevel: Effort.Low,
+		},
+		template: juniorTaskMd,
 	},
 ];
 
