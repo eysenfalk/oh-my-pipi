@@ -18,6 +18,7 @@ import { BUILTIN_SLASH_COMMANDS, loadSlashCommands } from "../extensibility/slas
 import { resolveLocalUrlToPath } from "../internal-urls";
 import { renameApprovedPlanFile } from "../plan-mode/approved-plan";
 import planModeApprovedPrompt from "../prompts/system/plan-mode-approved.md" with { type: "text" };
+import planReviewInstruction from "../prompts/system/plan-review-instruction.md" with { type: "text" };
 import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
 import { HistoryStorage } from "../session/history-storage";
 import type { SessionContext, SessionManager } from "../session/session-manager";
@@ -803,6 +804,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#renderPlanPreview(planContent);
 		const choice = await this.showHookSelector("Plan mode - next step", [
 			"Approve and execute",
+			"AI Review",
 			"Refine plan",
 			"Stay in plan mode",
 		]);
@@ -815,6 +817,12 @@ export class InteractiveMode implements InteractiveModeContext {
 				this.showError(
 					`Failed to finalize approved plan: ${error instanceof Error ? error.message : String(error)}`,
 				);
+			}
+			return;
+		}
+		if (choice === "AI Review") {
+			if (this.onInputCallback) {
+				this.onInputCallback(this.startPendingSubmission({ text: planReviewInstruction }));
 			}
 			return;
 		}

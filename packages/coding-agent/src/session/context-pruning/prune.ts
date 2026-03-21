@@ -1,11 +1,23 @@
 /**
  * Apply prune operations to messages.
  * Replaces tool call input content with a compact placeholder.
+ *
+ * SAFETY: applyPruneOperations preserves the content array structure — it only
+ * replaces tool call arguments, never adds/removes blocks. This makes it safe
+ * for assistant messages with thinking blocks (Anthropic requires the latest
+ * assistant message's thinking blocks to remain structurally identical).
  */
 import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { CompressRecord, PruneState } from "./types";
 
 const PRUNED_NOTICE = "[input pruned by context optimizer]";
+
+/** Check whether an assistant message contains thinking or redactedThinking blocks. */
+function hasThinkingBlocks(msg: AgentMessage): boolean {
+	const a = msg as { content?: Array<{ type: string }> };
+	if (!Array.isArray(a.content)) return false;
+	return a.content.some(b => b.type === "thinking" || b.type === "redactedThinking");
+}
 
 /**
  * Apply the current prune map to the message array.
@@ -50,6 +62,14 @@ export function applyPruneOperations(messages: AgentMessage[], state: PruneState
  *    where the first removed message was.
  *
  * Already-applied compressions just filter their coveredIds from messages.
+ *
+ * THINKING BLOCK SAFETY: The latest assistant message is never modified when it
+ * contains thinking or redactedThinking blocks. Anthropic requires the latest
+ * assistant message's thinking blocks to remain structurally identical (they carry
+ * cryptographic signatures). Covered tool calls in the latest message are deferred —
+ * they will be removed on the next call when a newer assistant message becomes the
+ * latest. The compression summary is also deferred to avoid showing both the summary
+ * and the original tool calls simultaneously.
  */
 export function applyCompressions(messages: AgentMessage[], state: PruneState): AgentMessage[] {
 	if (state.compressions.length === 0) return messages;
@@ -95,19 +115,38 @@ export function applyCompressions(messages: AgentMessage[], state: PruneState): 
 		for (const id of record.coveredIds) callIdToRecord.set(id, record);
 	}
 
+	// Find the last assistant message — it must not be modified if it has thinking blocks.
+	// Anthropic validates that the latest assistant message's content is structurally
+	// identical to what the server originally returned (signature-checked).
+	const lastAssistantIdx = messages.findLastIndex(m => m.role === "assistant");
+
 	// Build result: walk messages, skip covered calls + results, inject summaries
 	const injectedRecords = new Set<CompressRecord>();
 	const result: AgentMessage[] = [];
 
-	for (const msg of messages) {
+	for (let i = 0; i < messages.length; i++) {
+		const msg = messages[i];
+
 		if (msg.role === "assistant") {
 			const a = msg as { role: string; content: Array<{ type: string; id?: string }> };
 			const coveredBlocks = (a.content ?? []).filter(
 				b => b.type === "toolCall" && b.id && allCoveredCallIds.has(b.id),
 			);
+
+			// Guard: never strip tool calls from the latest assistant message when it
+			// contains thinking blocks. The covered IDs remain tracked — they will be
+			// removed on the next call when this message is no longer the latest.
+			// We also skip summary injection for these deferred tool calls to avoid
+			// showing both the summary and the original tool calls simultaneously.
+			if (i === lastAssistantIdx && hasThinkingBlocks(msg) && coveredBlocks.length > 0) {
+				result.push(msg);
+				continue;
+			}
+
 			const uncoveredBlocks = (a.content ?? []).filter(
 				b => !(b.type === "toolCall" && b.id && allCoveredCallIds.has(b.id)),
 			);
+			const hasUncoveredToolCalls = uncoveredBlocks.some(b => b.type === "toolCall");
 
 			// Inject summary user message for each newly-hit compression
 			for (const block of coveredBlocks) {
@@ -122,18 +161,39 @@ export function applyCompressions(messages: AgentMessage[], state: PruneState): 
 				}
 			}
 
-			if (uncoveredBlocks.length === 0) continue;
+			// When all tool calls in this message are covered and the remaining
+			// content is only thinking/text blocks, drop the entire message.
+			// The thinking/text was about the compressed tool calls — keeping
+			// orphaned thinking/text blocks would create consecutive assistant
+			// messages with no user messages between them, which violates the
+			// Anthropic alternating-roles constraint.
+			if (uncoveredBlocks.length === 0 || (!hasUncoveredToolCalls && coveredBlocks.length > 0)) continue;
 			result.push({ ...msg, content: uncoveredBlocks } as AgentMessage);
 			continue;
 		}
 
+		// Skip tool results whose calls were compressed (but not deferred)
 		if (msg.role === "toolResult") {
 			const r = msg as { role: string; toolCallId?: string };
-			if (r.toolCallId && allCoveredCallIds.has(r.toolCallId)) continue;
+			if (r.toolCallId && allCoveredCallIds.has(r.toolCallId)) {
+				// Check if this result's tool call was deferred (still in the latest assistant message)
+				const deferredBecauseOfThinking =
+					lastAssistantIdx >= 0 &&
+					hasThinkingBlocks(messages[lastAssistantIdx]) &&
+					isToolCallInMessage(messages[lastAssistantIdx], r.toolCallId);
+				if (!deferredBecauseOfThinking) continue;
+			}
 		}
 
 		result.push(msg);
 	}
 
 	return result;
+}
+
+/** Check whether an assistant message contains a tool call with the given ID. */
+function isToolCallInMessage(msg: AgentMessage, toolCallId: string): boolean {
+	const a = msg as { content?: Array<{ type: string; id?: string }> };
+	if (!Array.isArray(a.content)) return false;
+	return a.content.some(b => b.type === "toolCall" && b.id === toolCallId);
 }

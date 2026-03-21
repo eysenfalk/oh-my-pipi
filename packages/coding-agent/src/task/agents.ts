@@ -6,6 +6,7 @@
 import { Effort } from "@oh-my-pi/pi-ai";
 import { renderPromptTemplate } from "../config/prompt-templates";
 import { parseAgentFields } from "../discovery/helpers";
+import criticMd from "../prompts/agents/critic.md" with { type: "text" };
 import designerMd from "../prompts/agents/designer.md" with { type: "text" };
 import exploreMd from "../prompts/agents/explore.md" with { type: "text" };
 // Embed agent markdown files at build time
@@ -47,6 +48,7 @@ const EMBEDDED_AGENT_DEFS: EmbeddedAgentDef[] = [
 	{ fileName: "reviewer.md", template: reviewerMd },
 	{ fileName: "oracle.md", template: oracleMd },
 	{ fileName: "librarian.md", template: librarianMd },
+	{ fileName: "critic.md", template: criticMd },
 	{
 		fileName: "task.md",
 		frontmatter: {

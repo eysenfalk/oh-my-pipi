@@ -93,6 +93,35 @@ function makeAssistantToolCallMessage(toolName: string, args: Record<string, unk
 	};
 }
 
+function makeAssistantThinkingToolCallMessage(toolName: string, args: Record<string, unknown> = {}): AssistantMessage {
+	const toolCall: ToolCall = {
+		type: "toolCall",
+		id: `call_${toolName}_${++_toolCallSeq}`,
+		name: toolName,
+		arguments: args,
+	};
+	return {
+		role: "assistant",
+		content: [
+			{ type: "thinking", thinking: "Let me think about this...", thinkingSignature: "sig_mock_test" },
+			toolCall,
+		],
+		api: "anthropic-messages",
+		provider: "anthropic",
+		model: "mock",
+		usage: {
+			input: 10,
+			output: 20,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 30,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "toolUse",
+		timestamp: Date.now(),
+	};
+}
+
 function mockStream(response: AssistantMessage): MockAssistantStream {
 	const stream = new MockAssistantStream();
 	queueMicrotask(() => {
@@ -545,5 +574,88 @@ describe("compression pipeline E2E (mocked LLM)", () => {
 		const stats = session.getPruningStats();
 		expect(stats.compressions).toBe(1);
 		expect(stats.tokensSaved).toBeGreaterThan(0);
+	});
+
+	/**
+	 * Thinking block safety E2E: when the latest assistant message has thinking blocks,
+	 * its tool calls are NOT removed by compression. On the NEXT turn (when a new
+	 * assistant message becomes the latest), the deferred tool calls ARE removed and
+	 * the compression summary is injected.
+	 */
+	it("compression defers removal of latest assistant message with thinking blocks", async () => {
+		// Turn 1: thinking + tool call → executes → text response (2 streamFn calls)
+		scriptedResponses = [
+			makeAssistantThinkingToolCallMessage("bash", { command: "ls" }),
+			makeAssistantTextMessage("done with turn 1"),
+		];
+		await session.prompt("turn 1");
+
+		// Add compression covering turn 1
+		session.addCompressionRecord(makeCompressRecord("phase-1", "explored files"));
+
+		// Turn 2: plain text response.
+		// The tool call assistant from turn 1 has thinking blocks, but the latest
+		// assistant is now the text message. Compression should apply.
+		scriptedResponses = [makeAssistantTextMessage("turn 2 done")];
+		await session.prompt("turn 2");
+
+		// The tool call from turn 1 should be removed (it's not the latest assistant)
+		const turn2Context = capturedContexts[capturedContexts.length - 1];
+		expect(turn2Context).toBeDefined();
+		expect(hasToolCallBlock(turn2Context)).toBe(false);
+
+		// Compression summary should be present
+		const summary = findCompressionSummary(turn2Context);
+		expect(summary).toBeTruthy();
+		expect(summary).toContain("phase-1");
+
+		// Stats reflect the compression
+		const stats = session.getPruningStats();
+		expect(stats.compressions).toBe(1);
+		expect(stats.tokensSaved).toBeGreaterThan(0);
+	});
+
+	/**
+	 * When the latest assistant message has both thinking blocks and covered tool calls,
+	 * those tool calls must survive in the LLM context (not be stripped). The next turn
+	 * must then remove them once a newer assistant message takes over as latest.
+	 */
+	it("thinking blocks in latest assistant preserve tool calls until next turn", async () => {
+		// Turn 1: thinking + tool call → executes → text response
+		scriptedResponses = [
+			makeAssistantThinkingToolCallMessage("bash", { command: "ls" }),
+			makeAssistantTextMessage("done"),
+		];
+		await session.prompt("turn 1");
+
+		session.addCompressionRecord(makeCompressRecord("phase-1", "listed files"));
+
+		// Turn 2: another tool call with thinking, then text
+		scriptedResponses = [
+			makeAssistantThinkingToolCallMessage("bash", { command: "pwd" }),
+			makeAssistantTextMessage("done 2"),
+		];
+		await session.prompt("turn 2");
+
+		session.addCompressionRecord(makeCompressRecord("phase-2", "found working dir"));
+
+		// Turn 3: text only — both compressions should apply
+		scriptedResponses = [makeAssistantTextMessage("turn 3 done")];
+		await session.prompt("turn 3");
+
+		const turn3Context = capturedContexts[capturedContexts.length - 1];
+		expect(turn3Context).toBeDefined();
+
+		// Both compressions should have removed their tool calls
+		expect(hasToolCallBlock(turn3Context)).toBe(false);
+
+		// Both summaries should be present
+		const allSummaries = (turn3Context as Array<{ role: string; content: unknown }>).filter(
+			m => m.role === "user" && typeof m.content === "string" && (m.content as string).includes("[Compressed:"),
+		);
+		expect(allSummaries.length).toBe(2);
+
+		// The important assertion: no tool calls remain.
+		expect(session.getPruningStats().compressions).toBe(2);
 	});
 });

@@ -513,7 +513,7 @@ describe("applyCompressions", () => {
 		expect(originalUser).toBeDefined();
 	});
 
-	it("preserves non-toolCall content blocks in an assistant message", () => {
+	it("drops assistant message when all tool calls are covered even if text blocks remain", () => {
 		const state = createPruneState();
 		const u1 = makeUserMessage("go");
 		const id1 = makeToolCallId();
@@ -532,13 +532,53 @@ describe("applyCompressions", () => {
 		state.compressions.push(makeCompressRecord("phase", "done"));
 
 		const result = applyCompressions(messages, state);
-		// Assistant message should survive (has uncovered content: the text block)
+		// Assistant message should be dropped: all tool calls are covered, orphaned text is about the
+		// compressed tool call. Keeping it would create consecutive assistant messages with no user between them.
+		expect(result.some(m => m.role === "assistant")).toBe(false);
+
+		// Compression summary user message is injected instead
+		const summaryMsg = result.find(m => {
+			const c = (m as unknown as { content: unknown }).content;
+			return m.role === "user" && typeof c === "string" && c.includes("[Compressed:");
+		});
+		expect(summaryMsg).toBeDefined();
+	});
+
+	it("retains uncovered tool calls when only some are covered", () => {
+		const state = createPruneState();
+		const u1 = makeUserMessage("go");
+		const { msg: mixed, ids } = makeMultiToolCall(["bash", { command: "ls" }], ["grep", { pattern: "foo" }]);
+		const [id1, id2] = ids;
+		const tr1 = makeToolResult(id1, "bash");
+		const tr2 = makeToolResult(id2, "grep");
+		const messages = [u1, mixed, tr1, tr2];
+		syncStateFromMessages(state, messages);
+
+		// Pre-applied compression covers only id1
+		const comp1: CompressRecord = {
+			topic: "partial",
+			summary: "did bash",
+			upToTurn: Number.MAX_SAFE_INTEGER,
+			applied: true,
+			coveredIds: [id1],
+		};
+		state.compressions.push(comp1);
+
+		const result = applyCompressions(messages, state);
+
+		// Assistant survives because it has an uncovered tool call (id2)
 		const assistantMsg = result.find(m => m.role === "assistant") as
-			| { role: string; content: Array<{ type: string }> }
+			| { role: string; content: Array<{ type: string; id?: string }> }
 			| undefined;
 		expect(assistantMsg).toBeDefined();
+		// Only the uncovered tool call (id2) remains in the assistant content
 		expect(assistantMsg!.content).toHaveLength(1);
-		expect(assistantMsg!.content[0].type).toBe("text");
+		expect(assistantMsg!.content[0].id).toBe(id2);
+
+		// Covered tool call's result (tr1) is removed; uncovered (tr2) is kept
+		const toolResults = result.filter(m => m.role === "toolResult") as unknown as Array<{ toolCallId: string }>;
+		expect(toolResults).toHaveLength(1);
+		expect(toolResults[0].toolCallId).toBe(id2);
 	});
 
 	it("covers only new tool calls in a second compression (not already-covered IDs)", () => {
@@ -711,5 +751,244 @@ describe("applyContextPruning pipeline — with compression", () => {
 		// Would be same reference if the pipeline early-returned
 		expect(result).not.toBe(messages);
 		expect(result.some(m => m.role === "assistant")).toBe(false);
+	});
+});
+
+/** Build an assistant message containing a thinking block and one tool call */
+function makeThinkingToolCall(name: string, args: Record<string, unknown>): AgentMessage {
+	return {
+		role: "assistant",
+		content: [
+			{ type: "thinking", thinking: "Let me analyze...", thinkingSignature: "sig_test_abc" },
+			{ type: "toolCall", id: makeToolCallId(), name, arguments: args },
+		],
+		timestamp: Date.now(),
+	} as unknown as AgentMessage;
+}
+
+/** Build an assistant message containing a redactedThinking block and one tool call */
+function makeRedactedThinkingToolCall(name: string, args: Record<string, unknown>): AgentMessage {
+	return {
+		role: "assistant",
+		content: [
+			{ type: "redactedThinking", data: "opaque_data_blob" },
+			{ type: "toolCall", id: makeToolCallId(), name, arguments: args },
+		],
+		timestamp: Date.now(),
+	} as unknown as AgentMessage;
+}
+
+describe("applyCompressions — thinking block safety", () => {
+	it("does not modify the latest assistant message when it contains thinking blocks and covered tool calls", () => {
+		// Setup: [user, thinkingToolCall, toolResult]
+		const state = createPruneState();
+		const u1 = makeUserMessage("go");
+		const tc1 = makeThinkingToolCall("bash", { cmd: "ls" });
+		const id1 = getToolCallId(tc1);
+		const tr1 = makeToolResult(id1, "bash");
+		const messages = [u1, tc1, tr1];
+		syncStateFromMessages(state, messages);
+		state.compressions.push(makeCompressRecord("exploration", "explored the repo"));
+
+		const result = applyCompressions(messages, state);
+
+		// The assistant message must be the exact same object reference (guard: not modified)
+		const resultAssistant = result.find(m => m.role === "assistant");
+		expect(resultAssistant === tc1).toBe(true);
+
+		// Content still contains both thinking and toolCall blocks
+		const content = (resultAssistant as unknown as { content: Array<{ type: string }> }).content;
+		expect(content.some(b => b.type === "thinking")).toBe(true);
+		expect(content.some(b => b.type === "toolCall")).toBe(true);
+
+		// Tool result is also kept (deferred alongside its call)
+		expect(result.some(m => m.role === "toolResult")).toBe(true);
+
+		// No compression summary is injected (deferred)
+		const summaryMsg = result.find(m => {
+			const c = (m as unknown as { content: unknown }).content;
+			return m.role === "user" && typeof c === "string" && c.includes("[Compressed:");
+		});
+		expect(summaryMsg).toBeUndefined();
+	});
+
+	it("drops non-latest assistant message with thinking when all tool calls are covered", () => {
+		// Setup: [user, thinkingToolCall_1, toolResult_1, user, normalToolCall_2, toolResult_2]
+		const state = createPruneState();
+		const u1 = makeUserMessage("first");
+		const tc1 = makeThinkingToolCall("bash", { cmd: "ls" });
+		const id1 = getToolCallId(tc1);
+		const tr1 = makeToolResult(id1, "bash");
+		const u2 = makeUserMessage("second");
+		const tc2 = makeToolCall("grep", { pattern: "foo" });
+		const id2 = getToolCallId(tc2);
+		const tr2 = makeToolResult(id2, "grep");
+		const messages = [u1, tc1, tr1, u2, tc2, tr2];
+		syncStateFromMessages(state, messages);
+		state.compressions.push(makeCompressRecord("both-phases", "did everything"));
+
+		const result = applyCompressions(messages, state);
+
+		// tc1 (non-latest thinking): dropped entirely — orphaned thinking block with no uncovered
+		// tool calls would create consecutive assistant messages violating alternating-roles.
+		// tc2 (latest, no thinking, fully covered): also dropped.
+		const assistants = result.filter(m => m.role === "assistant");
+		expect(assistants.length).toBe(0);
+
+		// Both tool results are removed
+		expect(result.some(m => m.role === "toolResult")).toBe(false);
+
+		// Compression summary IS injected
+		const summaryMsg = result.find(m => {
+			const c = (m as unknown as { content: unknown }).content;
+			return m.role === "user" && typeof c === "string" && c.includes("[Compressed:");
+		});
+		expect(summaryMsg).toBeDefined();
+	});
+
+	it("deferred compression is applied on the next turn when thinking message is no longer latest", () => {
+		// Turn 1: compression deferred because latest assistant has thinking
+		const state = createPruneState();
+		const u1 = makeUserMessage("turn1");
+		const tc1 = makeThinkingToolCall("bash", { cmd: "ls" });
+		const id1 = getToolCallId(tc1);
+		const tr1 = makeToolResult(id1, "bash");
+		const turn1Messages = [u1, tc1, tr1];
+		syncStateFromMessages(state, turn1Messages);
+		state.compressions.push(makeCompressRecord("turn1-phase", "explored"));
+
+		const afterTurn1 = applyCompressions(turn1Messages, state);
+		// Still deferred: tc1 is still present
+		expect(afterTurn1.some(m => m.role === "assistant")).toBe(true);
+
+		// Turn 2: add a new assistant message — tc1 is now no longer latest
+		const u2 = makeUserMessage("turn2");
+		const tc2 = makeToolCall("grep", { pattern: "bar" });
+		const id2 = getToolCallId(tc2);
+		const tr2 = makeToolResult(id2, "grep");
+		const turn2Messages = [...turn1Messages, u2, tc2, tr2];
+		syncStateFromMessages(state, turn2Messages);
+
+		const afterTurn2 = applyCompressions(turn2Messages, state);
+
+		// tc1 (thinking, now non-latest): its toolCall (id1) is removed by the compression.
+		// id2 (tc2's toolCall) was added AFTER the compression was already applied,
+		// so tc2 is NOT covered — it still has its toolCall in the result.
+		const hasId1ToolCall = afterTurn2
+			.filter(m => m.role === "assistant")
+			.some(a => {
+				const content = (a as unknown as { content: Array<{ type: string; id?: string }> }).content;
+				return content.some(b => b.type === "toolCall" && b.id === id1);
+			});
+		expect(hasId1ToolCall).toBe(false);
+
+		// Compression summary should now be injected
+		const summaryMsg = afterTurn2.find(m => {
+			const c = (m as unknown as { content: unknown }).content;
+			return m.role === "user" && typeof c === "string" && c.includes("[Compressed:");
+		});
+		expect(summaryMsg).toBeDefined();
+	});
+
+	it("redactedThinking blocks trigger the same guard as thinking blocks", () => {
+		// Same as test 1 but with redactedThinking
+		const state = createPruneState();
+		const u1 = makeUserMessage("go");
+		const tc1 = makeRedactedThinkingToolCall("bash", { cmd: "pwd" });
+		const id1 = getToolCallId(tc1);
+		const tr1 = makeToolResult(id1, "bash");
+		const messages = [u1, tc1, tr1];
+		syncStateFromMessages(state, messages);
+		state.compressions.push(makeCompressRecord("redacted-phase", "used redacted thinking"));
+
+		const result = applyCompressions(messages, state);
+
+		// Same object reference — guard triggered for redactedThinking too
+		const resultAssistant = result.find(m => m.role === "assistant");
+		expect(resultAssistant === tc1).toBe(true);
+
+		// Content still contains redactedThinking and toolCall blocks
+		const content = (resultAssistant as unknown as { content: Array<{ type: string }> }).content;
+		expect(content.some(b => b.type === "redactedThinking")).toBe(true);
+		expect(content.some(b => b.type === "toolCall")).toBe(true);
+
+		// Tool result is kept (deferred)
+		expect(result.some(m => m.role === "toolResult")).toBe(true);
+
+		// No compression summary injected
+		const summaryMsg = result.find(m => {
+			const c = (m as unknown as { content: unknown }).content;
+			return m.role === "user" && typeof c === "string" && c.includes("[Compressed:");
+		});
+		expect(summaryMsg).toBeUndefined();
+	});
+
+	it("modifies the latest assistant message normally when it has no thinking blocks", () => {
+		// Normal behavior: no thinking → tool call is removed and summary is injected
+		const state = createPruneState();
+		const u1 = makeUserMessage("go");
+		const tc1 = makeToolCall("bash", { cmd: "echo hi" });
+		const id1 = getToolCallId(tc1);
+		const tr1 = makeToolResult(id1, "bash");
+		const messages = [u1, tc1, tr1];
+		syncStateFromMessages(state, messages);
+		state.compressions.push(makeCompressRecord("normal-phase", "normal summary"));
+
+		const result = applyCompressions(messages, state);
+
+		// Tool call is removed
+		expect(result.some(m => m.role === "assistant")).toBe(false);
+
+		// Tool result is also removed
+		expect(result.some(m => m.role === "toolResult")).toBe(false);
+
+		// Compression summary is injected
+		const summaryMsg = result.find(m => {
+			const c = (m as unknown as { content: unknown }).content;
+			return m.role === "user" && typeof c === "string" && c.includes("[Compressed:");
+		});
+		expect(summaryMsg).toBeDefined();
+	});
+
+	it("defers latest thinking msg, drops non-latest thinking msg", () => {
+		// Two compression records, each covering one turn
+		const state = createPruneState();
+		const u1 = makeUserMessage("first");
+		// Non-latest assistant: has thinking, but NOT the last assistant in the list
+		const tc1 = makeThinkingToolCall("bash", { cmd: "ls" });
+		const id1 = getToolCallId(tc1);
+		const tr1 = makeToolResult(id1, "bash");
+		const u2 = makeUserMessage("second");
+		// Latest assistant: also has thinking
+		const tc2 = makeThinkingToolCall("grep", { pattern: "foo" });
+		const id2 = getToolCallId(tc2);
+		const tr2 = makeToolResult(id2, "grep");
+		const messages = [u1, tc1, tr1, u2, tc2, tr2];
+		syncStateFromMessages(state, messages);
+		state.compressions.push(makeCompressRecord("phase-1", "first phase done"));
+		state.compressions.push(makeCompressRecord("phase-2", "second phase done"));
+
+		const result = applyCompressions(messages, state);
+
+		// tc1 (non-latest, thinking): dropped entirely — orphaned thinking with no uncovered
+		// tool calls violates alternating-roles.
+		// tc2 (latest, thinking): deferred as-is — same object reference
+		const assistants = result.filter(m => m.role === "assistant");
+		// Only tc2 (deferred) remains; tc1 is dropped
+		expect(assistants.length).toBe(1);
+		expect(assistants[0] === tc2).toBe(true);
+
+		// tr2 (result for deferred tc2) is kept; tr1 (result for dropped tc1) is gone
+		const toolResults = result.filter(m => m.role === "toolResult");
+		expect(toolResults.length).toBe(1);
+		const keptResult = toolResults[0] as unknown as { toolCallId: string };
+		expect(keptResult.toolCallId).toBe(id2);
+
+		// At least one compression summary is injected (for tc1's coverage)
+		const summaryMsgs = result.filter(m => {
+			const c = (m as unknown as { content: unknown }).content;
+			return m.role === "user" && typeof c === "string" && c.includes("[Compressed:");
+		});
+		expect(summaryMsgs.length).toBeGreaterThanOrEqual(1);
 	});
 });

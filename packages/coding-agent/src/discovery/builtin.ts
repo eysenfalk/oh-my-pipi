@@ -189,6 +189,8 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>> 
 	const paths = [
 		{ path: path.join(ctx.cwd, PATHS.projectDir, "mcp.json"), level: "project" as const },
 		{ path: path.join(ctx.cwd, PATHS.projectDir, ".mcp.json"), level: "project" as const },
+		{ path: path.join(ctx.home, PATHS.userBase, "mcp.json"), level: "user" as const },
+		{ path: path.join(ctx.home, PATHS.userBase, ".mcp.json"), level: "user" as const },
 		{ path: path.join(ctx.home, PATHS.userAgent, "mcp.json"), level: "user" as const },
 		{ path: path.join(ctx.home, PATHS.userAgent, ".mcp.json"), level: "user" as const },
 	];
