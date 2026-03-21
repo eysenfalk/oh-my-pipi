@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added MiniMax-M2.7 and MiniMax-M2.7-highspeed models to MiniMax Coding Plan (international) provider
+
 ## [13.13.2] - 2026-03-18
 ### Changed
 
