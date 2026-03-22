@@ -1,5 +1,7 @@
 import * as path from "node:path";
 import { renderPromptTemplate } from "../../../../config/prompt-templates";
+import type { SettingPath, SettingValue } from "../../../../config/settings";
+import { settings } from "../../../../config/settings";
 import type { HookCommandContext } from "../../../hooks/types";
 import type { CustomCommand } from "../../types";
 import {
@@ -33,6 +35,29 @@ export class WorkflowCommand implements CustomCommand {
 		}
 
 		switch (subcommand) {
+			case "config": {
+				const stages: ReadonlyArray<{ key: SettingPath; label: string }> = [
+					{ key: "planning.stages.understand" as SettingPath, label: "understand" },
+					{ key: "planning.stages.design" as SettingPath, label: "design" },
+					{ key: "planning.stages.review" as SettingPath, label: "review" },
+				];
+				if (!ctx.hasUI) {
+					const active = stages.filter(s => settings.get(s.key)).map(s => s.label);
+					active.push("plan");
+					return `Planning stages: ${active.join(" → ")} (use in interactive mode to configure)`;
+				}
+				for (const { key, label } of stages) {
+					const current = settings.get(key) as boolean;
+					const confirmed = await ctx.ui.confirm(
+						`Enable "${label}" stage?`,
+						`Currently: ${current ? "ON" : "OFF"}. The "plan" stage is always enabled.`,
+					);
+					settings.set(key, confirmed as SettingValue<SettingPath>);
+				}
+				const configured = stages.filter(s => settings.get(s.key)).map(s => s.label);
+				configured.push("plan");
+				return `Planning stages configured: ${configured.join(" → ")}`;
+			}
 			case "brainstorm":
 				return this.#startBrainstorm(rest, ctx);
 			case "spec":

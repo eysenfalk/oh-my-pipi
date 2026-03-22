@@ -24,6 +24,10 @@ export interface SegmentContext {
 		enabled: boolean;
 		paused: boolean;
 		autoMode?: boolean;
+		stage?: string;
+		stageIndex?: number;
+		totalStages?: number;
+		readOnly?: boolean;
 	} | null;
 	// Cached values for performance (computed once per render)
 	usageStats: {

@@ -149,6 +149,8 @@ export interface ToolSession {
 	settings: Settings;
 	/** Plan mode state (if active) */
 	getPlanModeState?: () => PlanModeState | undefined;
+	/** Whether read-only mode is active (blocks writes and bash). */
+	getReadOnlyMode?: () => boolean;
 	/** Get compact conversation context for subagents (excludes tool results, system prompts) */
 	getCompactContext?: () => string;
 	/** Get cached todo phases for this session. */

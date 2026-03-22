@@ -97,7 +97,7 @@ import {
 } from "../mcp/discoverable-tool-metadata";
 import { getCurrentThemeName, theme } from "../modes/theme/theme";
 import { normalizeDiff, normalizeToLF, ParseError, previewPatch, stripBom } from "../patch";
-import type { PlanModeState } from "../plan-mode/state";
+import { currentStage, type PlanModeState } from "../plan-mode/state";
 import autoHandoffThresholdFocusPrompt from "../prompts/system/auto-handoff-threshold-focus.md" with { type: "text" };
 import eagerTodoPrompt from "../prompts/system/eager-todo.md" with { type: "text" };
 import handoffDocumentPrompt from "../prompts/system/handoff-document.md" with { type: "text" };
@@ -106,6 +106,8 @@ import planModeReferencePrompt from "../prompts/system/plan-mode-reference.md" w
 import planModeToolDecisionReminderPrompt from "../prompts/system/plan-mode-tool-decision-reminder.md" with {
 	type: "text",
 };
+import readOnlyActivePrompt from "../prompts/system/read-only-active.md" with { type: "text" };
+import readOnlyDisabledPrompt from "../prompts/system/read-only-disabled.md" with { type: "text" };
 import ttsrInterruptTemplate from "../prompts/system/ttsr-interrupt.md" with { type: "text" };
 import type { SecretObfuscator } from "../secrets/obfuscator";
 import { resolveThinkingLevelForModel, toReasoningEffort } from "../thinking";
@@ -373,6 +375,7 @@ export class AgentSession {
 	/** Messages queued to be included with the next user prompt as context ("asides"). */
 	#pendingNextTurnMessages: CustomMessage[] = [];
 	#planModeState: PlanModeState | undefined;
+	#readOnlyMode = false;
 	#planReferenceSent = false;
 	#planReferencePath = "local://PLAN.md";
 
@@ -2117,6 +2120,38 @@ export class AgentSession {
 		}
 	}
 
+	getReadOnlyMode(): boolean {
+		return this.#readOnlyMode;
+	}
+
+	setReadOnlyMode(enabled: boolean): void {
+		this.#readOnlyMode = enabled;
+	}
+
+	async sendReadOnlyContext(options?: { deliverAs?: "steer" | "followUp" | "nextTurn" }): Promise<void> {
+		const content = renderPromptTemplate(readOnlyActivePrompt);
+		await this.sendCustomMessage(
+			{
+				customType: "read-only-context",
+				content,
+				display: false,
+			},
+			options ? { deliverAs: options.deliverAs } : undefined,
+		);
+	}
+
+	async sendReadOnlyDisabledContext(options?: { deliverAs?: "steer" | "followUp" | "nextTurn" }): Promise<void> {
+		const content = renderPromptTemplate(readOnlyDisabledPrompt);
+		await this.sendCustomMessage(
+			{
+				customType: "read-only-disabled",
+				content,
+				display: false,
+			},
+			options ? { deliverAs: options.deliverAs } : undefined,
+		);
+	}
+
 	markPlanReferenceSent(): void {
 		this.#planReferenceSent = true;
 	}
@@ -2252,6 +2287,10 @@ export class AgentSession {
 			reentry: state.reentry ?? false,
 			iterative: state.workflow === "iterative",
 			autoMode: state.autoMode ?? false,
+			isMultiStage: (state.stages?.length ?? 1) > 1,
+			stageName: currentStage(state),
+			stageIndex: (state.currentStageIndex ?? 0) + 1,
+			totalStages: state.stages?.length ?? 1,
 		});
 
 		return {

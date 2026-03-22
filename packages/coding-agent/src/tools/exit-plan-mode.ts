@@ -3,13 +3,16 @@ import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallb
 import { isEnoent } from "@oh-my-pi/pi-utils";
 import { type Static, Type } from "@sinclair/typebox";
 import { renderPromptTemplate } from "../config/prompt-templates";
+import { currentStage, isLastStage } from "../plan-mode/state";
 import exitPlanModeDescription from "../prompts/tools/exit-plan-mode.md" with { type: "text" };
 import type { ToolSession } from ".";
 import { resolvePlanPath } from "./plan-mode-guard";
 import { ToolError } from "./tool-errors";
 
 const exitPlanModeSchema = Type.Object({
-	title: Type.String({ description: "Final plan title, e.g. WP_MIGRATION_PLAN" }),
+	title: Type.Optional(
+		Type.String({ description: "Final plan title — required only for the last stage, e.g. WP_MIGRATION_PLAN" }),
+	),
 });
 
 type ExitPlanModeParams = Static<typeof exitPlanModeSchema>;
@@ -36,8 +39,10 @@ function normalizePlanTitle(title: string): { title: string; fileName: string } 
 export interface ExitPlanModeDetails {
 	planFilePath: string;
 	planExists: boolean;
-	title: string;
-	finalPlanFilePath: string;
+	title?: string;
+	finalPlanFilePath?: string;
+	isIntermediate: boolean;
+	currentStage: string;
 }
 
 export class ExitPlanModeTool implements AgentTool<typeof exitPlanModeSchema, ExitPlanModeDetails> {
@@ -63,10 +68,10 @@ export class ExitPlanModeTool implements AgentTool<typeof exitPlanModeSchema, Ex
 			throw new ToolError("Plan mode is not active.");
 		}
 
-		const normalized = normalizePlanTitle(params.title);
-		const finalPlanFilePath = `local://${normalized.fileName}`;
+		const stageName = currentStage(state);
+		const intermediate = !isLastStage(state);
+
 		const resolvedPlanPath = resolvePlanPath(this.session, state.planFilePath);
-		resolvePlanPath(this.session, finalPlanFilePath);
 		let planExists = false;
 		try {
 			const stat = await fs.stat(resolvedPlanPath);
@@ -79,9 +84,32 @@ export class ExitPlanModeTool implements AgentTool<typeof exitPlanModeSchema, Ex
 
 		if (!planExists) {
 			throw new ToolError(
-				`Plan file not found at ${state.planFilePath}. Write the finalized plan to ${state.planFilePath} before calling exit_plan_mode.`,
+				`Stage file not found at ${state.planFilePath}. Write the stage output to ${state.planFilePath} before calling exit_plan_mode.`,
 			);
 		}
+
+		if (intermediate) {
+			return {
+				content: [{ type: "text", text: "Stage complete. Ready for review and advancement to next stage." }],
+				details: {
+					planFilePath: state.planFilePath,
+					planExists,
+					isIntermediate: true,
+					currentStage: stageName,
+				},
+			};
+		}
+
+		// Final stage: require title
+		if (!params.title) {
+			throw new ToolError(
+				'Title is required for the final plan stage. Call exit_plan_mode({ title: "YOUR_PLAN_NAME" }).',
+			);
+		}
+		const normalized = normalizePlanTitle(params.title);
+		const finalPlanFilePath = `local://${normalized.fileName}`;
+		// Validate the final path resolves correctly
+		resolvePlanPath(this.session, finalPlanFilePath);
 
 		return {
 			content: [{ type: "text", text: "Plan ready for approval." }],
@@ -90,6 +118,8 @@ export class ExitPlanModeTool implements AgentTool<typeof exitPlanModeSchema, Ex
 				planExists,
 				title: normalized.title,
 				finalPlanFilePath,
+				isIntermediate: false,
+				currentStage: stageName,
 			},
 		};
 	}

@@ -220,6 +220,8 @@ export interface InteractiveModeContext {
 	handlePlanModeCommand(initialPrompt?: string): Promise<void>;
 	handleAutoModeCommand(initialPrompt?: string): Promise<void>;
 	handleExitPlanModeTool(details: ExitPlanModeDetails): Promise<void>;
+	handleReadOnlyCommand(): Promise<void>;
+	handleWorkflowConfigCommand(): Promise<void>;
 
 	// Hook UI methods
 	initHooksAndCustomTools(): Promise<void>;

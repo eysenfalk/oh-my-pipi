@@ -78,11 +78,29 @@ const planModeSegment: StatusLineSegment = {
 	id: "plan_mode",
 	render(ctx) {
 		const status = ctx.planMode;
-		if (!status || (!status.enabled && !status.paused)) {
+		if (!status) {
 			return { content: "", visible: false };
 		}
 
-		const label = status.paused ? "Plan \u23f8" : status.autoMode ? "Auto" : "Plan";
+		// Read-only mode
+		if (status.readOnly) {
+			const content = withIcon(theme.icon.plan, "Read-Only");
+			return { content: theme.fg("warning", content), visible: true };
+		}
+
+		if (!status.enabled && !status.paused) {
+			return { content: "", visible: false };
+		}
+
+		let label = status.paused ? "Plan \u23f8" : status.autoMode ? "Auto" : "Plan";
+		if (
+			status.stage &&
+			status.stageIndex !== undefined &&
+			status.totalStages !== undefined &&
+			status.totalStages > 1
+		) {
+			label += `: ${status.stage} ${status.stageIndex}/${status.totalStages}`;
+		}
 		const content = withIcon(theme.icon.plan, label);
 		const color = status.paused ? "warning" : "accent";
 		return { content: theme.fg(color, content), visible: true };

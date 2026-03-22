@@ -12,11 +12,13 @@ import chalk from "chalk";
 import { KeybindingsManager } from "../config/keybindings";
 import { renderPromptTemplate } from "../config/prompt-templates";
 import { type Settings, settings } from "../config/settings";
+import { generateSlug, writeWorkflowArtifact } from "../extensibility/custom-commands/bundled/workflow/artifacts";
 import type { ExtensionUIContext, ExtensionUIDialogOptions } from "../extensibility/extensions";
 import type { CompactOptions } from "../extensibility/extensions/types";
 import { BUILTIN_SLASH_COMMANDS, loadSlashCommands } from "../extensibility/slash-commands";
 import { resolveLocalUrlToPath } from "../internal-urls";
 import { renameApprovedPlanFile } from "../plan-mode/approved-plan";
+import { currentStage, type PlanStage, stageFilePath } from "../plan-mode/state";
 import planModeApprovedPrompt from "../prompts/system/plan-mode-approved.md" with { type: "text" };
 import planReviewInstruction from "../prompts/system/plan-review-instruction.md" with { type: "text" };
 import type { AgentSession, AgentSessionEvent } from "../session/agent-session";
@@ -587,14 +589,35 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	#updatePlanModeStatus(): void {
 		const planState = this.session.getPlanModeState();
-		const status =
-			this.planModeEnabled || this.planModePaused
-				? {
-						enabled: this.planModeEnabled,
-						paused: this.planModePaused,
-						autoMode: planState?.autoMode,
-					}
-				: undefined;
+		const readOnly = this.session.getReadOnlyMode?.() ?? false;
+
+		let status:
+			| {
+					enabled: boolean;
+					paused: boolean;
+					autoMode?: boolean;
+					stage?: string;
+					stageIndex?: number;
+					totalStages?: number;
+					readOnly?: boolean;
+			  }
+			| undefined;
+
+		if (this.planModeEnabled || this.planModePaused) {
+			const totalStages = planState?.stages?.length ?? 1;
+			const isMultiStage = totalStages > 1;
+			status = {
+				enabled: this.planModeEnabled,
+				paused: this.planModePaused,
+				autoMode: planState?.autoMode,
+				stage: isMultiStage && planState ? currentStage(planState) : undefined,
+				stageIndex: isMultiStage ? (planState?.currentStageIndex ?? 0) + 1 : undefined,
+				totalStages: isMultiStage ? totalStages : undefined,
+			};
+		} else if (readOnly) {
+			status = { enabled: false, paused: false, readOnly: true };
+		}
+
 		this.statusLine.setPlanModeStatus(status);
 		this.updateEditorTopBorder();
 		this.ui.requestRender();
@@ -659,7 +682,11 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		this.planModePaused = false;
 
-		const planFilePath = options?.planFilePath ?? (await this.#getPlanFilePath());
+		// When restoring from a session (planFilePath provided), preserve the restored path
+		// as a single-stage plan. Computing fresh stages would produce a mismatched
+		// currentStageIndex (always 0) against a potentially mid-session planFilePath.
+		const stages = options?.planFilePath ? (["plan"] as PlanStage[]) : this.#resolveActiveStages();
+		const planFilePath = options?.planFilePath ?? stageFilePath(stages[0]);
 		const previousTools = this.session.getActiveToolNames();
 		const hasExitTool = this.session.getToolByName("exit_plan_mode") !== undefined;
 		const planTools = hasExitTool ? [...previousTools, "exit_plan_mode"] : previousTools;
@@ -676,6 +703,10 @@ export class InteractiveMode implements InteractiveModeContext {
 			workflow: options?.workflow ?? "parallel",
 			reentry: this.#planModeHasEntered,
 			autoMode: options?.autoMode,
+			stages,
+			currentStageIndex: 0,
+			completedStages: {},
+			stageRetryCount: 0,
 		});
 		if (this.session.isStreaming) {
 			await this.session.sendPlanModeContext({ deliverAs: "steer" });
@@ -685,7 +716,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#updatePlanModeStatus();
 		const modeLabel = options?.autoMode ? "Auto" : "Plan";
 		this.sessionManager.appendModeChange("plan", { planFilePath });
-		this.showStatus(`${modeLabel} mode enabled. Plan file: ${planFilePath}`);
+		this.showStatus(`${modeLabel} mode enabled. Stage: ${stages[0]} (${planFilePath})`);
 	}
 
 	async #exitPlanMode(options?: { silent?: boolean; paused?: boolean }): Promise<void> {
@@ -775,12 +806,20 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	async handlePlanModeCommand(initialPrompt?: string): Promise<void> {
 		if (this.planModeEnabled) {
+			if (this.session.getPlanModeState()?.autoMode) {
+				this.showError("Auto mode is active. Exit it first with /auto.");
+				return;
+			}
 			const confirmed = await this.showHookConfirm(
 				"Exit plan mode?",
 				"This exits plan mode without approving a plan.",
 			);
 			if (!confirmed) return;
 			await this.#exitPlanMode({ paused: true });
+			return;
+		}
+		if (this.session.getReadOnlyMode?.()) {
+			this.showError("Read-only mode is active. Exit it first with /read-only.");
 			return;
 		}
 		await this.#enterPlanMode();
@@ -791,12 +830,20 @@ export class InteractiveMode implements InteractiveModeContext {
 
 	async handleAutoModeCommand(initialPrompt?: string): Promise<void> {
 		if (this.planModeEnabled) {
+			if (!this.session.getPlanModeState()?.autoMode) {
+				this.showError("Plan mode is active. Exit it first with /plan.");
+				return;
+			}
 			const confirmed = await this.showHookConfirm(
 				"Exit auto mode?",
 				"This exits auto mode without approving a plan.",
 			);
 			if (!confirmed) return;
 			await this.#exitPlanMode({ paused: true });
+			return;
+		}
+		if (this.session.getReadOnlyMode?.()) {
+			this.showError("Read-only mode is active. Exit it first with /read-only.");
 			return;
 		}
 		await this.#enterPlanMode({ autoMode: true });
@@ -811,21 +858,96 @@ export class InteractiveMode implements InteractiveModeContext {
 			return;
 		}
 
-		// Abort the agent to prevent it from continuing (e.g., calling exit_plan_mode
-		// again) while the popup is showing. The event listener fires asynchronously
-		// (agent's #emit is fire-and-forget), so without this the model sees "Plan
-		// ready for approval." and immediately calls exit_plan_mode in a loop.
 		await this.session.abort();
 
 		const planFilePath = details.planFilePath || this.planModePlanFilePath || (await this.#getPlanFilePath());
 		this.planModePlanFilePath = planFilePath;
-		const planContent = await this.#readPlanFile(planFilePath);
-		if (!planContent) {
-			this.showError(`Plan file not found at ${planFilePath}`);
+		const stageContent = await this.#readPlanFile(planFilePath);
+		if (!stageContent) {
+			this.showError(`Stage file not found at ${planFilePath}`);
 			return;
 		}
 
-		this.#renderPlanPreview(planContent);
+		this.#renderPlanPreview(stageContent);
+
+		if (details.isIntermediate) {
+			await this.#handleIntermediateStageApproval(details, stageContent);
+		} else {
+			await this.#handleFinalStageApproval(details, stageContent);
+		}
+	}
+
+	#resolveActiveStages(): PlanStage[] {
+		const stages: PlanStage[] = [];
+		if (settings.get("planning.stages.understand")) stages.push("understand");
+		if (settings.get("planning.stages.design")) stages.push("design");
+		if (settings.get("planning.stages.review")) stages.push("review");
+		stages.push("plan");
+		return stages;
+	}
+
+	async #advanceStage(completedContent: string): Promise<void> {
+		const state = this.session.getPlanModeState();
+		if (!state?.stages) return;
+
+		const currentIdx = state.currentStageIndex ?? 0;
+		const currentStageName = state.stages[currentIdx];
+		const nextIdx = currentIdx + 1;
+		const nextStage = state.stages[nextIdx];
+		if (!nextStage) return;
+
+		const nextFilePath = stageFilePath(nextStage);
+		this.session.setPlanModeState({
+			...state,
+			planFilePath: nextFilePath,
+			currentStageIndex: nextIdx,
+			stageRetryCount: 0,
+			completedStages: { ...state.completedStages, [currentStageName]: completedContent },
+		});
+		this.planModePlanFilePath = nextFilePath;
+		this.#updatePlanModeStatus();
+
+		await this.session.sendPlanModeContext({ deliverAs: "steer" });
+		this.showStatus(`Stage "${currentStageName}" approved. Starting "${nextStage}" -> ${nextFilePath}`);
+	}
+
+	async #handleIntermediateStageApproval(details: ExitPlanModeDetails, stageContent: string): Promise<void> {
+		const state = this.session.getPlanModeState();
+		if (!state) return;
+
+		if (state.autoMode) {
+			// In auto mode, critic auto-reviews intermediate stages.
+			// Simple implementation: auto-approve (critic dispatch to be added in Phase 4).
+			const approved = await this.#criticReviewStage(details.currentStage, stageContent);
+			if (approved) {
+				await this.#advanceStage(stageContent);
+			} else {
+				const retries = (state.stageRetryCount ?? 0) + 1;
+				if (retries >= 3) {
+					this.showError(`Stage "${details.currentStage}" failed critic review after 3 attempts. Stopping.`);
+					await this.#exitPlanMode({ paused: true });
+					return;
+				}
+				this.session.setPlanModeState({ ...state, stageRetryCount: retries });
+				this.showWarning(`Critic rejected "${details.currentStage}" stage (attempt ${retries}/3). Refining...`);
+			}
+			return;
+		}
+
+		const choice = await this.showHookSelector(
+			`${details.currentStage.charAt(0).toUpperCase() + details.currentStage.slice(1)} stage - next step`,
+			["Approve and continue", "Refine", "Stay in stage"],
+		);
+		if (choice === "Approve and continue") {
+			await this.#advanceStage(stageContent);
+		} else if (choice === "Refine") {
+			const refinement = await this.showHookInput("What should be refined?");
+			if (refinement) this.editor.setText(refinement);
+		}
+		// "Stay in stage": agent continues on its own
+	}
+
+	async #handleFinalStageApproval(details: ExitPlanModeDetails, planContent: string): Promise<void> {
 		const choice = await this.showHookSelector("Plan mode - next step", [
 			"Approve and execute",
 			"AI Review",
@@ -834,9 +956,20 @@ export class InteractiveMode implements InteractiveModeContext {
 		]);
 
 		if (choice === "Approve and execute") {
-			const finalPlanFilePath = details.finalPlanFilePath || planFilePath;
+			const state = this.session.getPlanModeState();
+			// Persist all completed stages to docs/workflow/ before creating the execution session
+			// Only persist intermediate stages to docs/workflow/ when there actually are
+			// completed intermediate stages. An empty completedStages ({}) means single-stage
+			// mode — skip the slug prompt and persistence entirely.
+			const completedStageKeys = state ? Object.keys(state.completedStages ?? {}) : [];
+			if (completedStageKeys.length > 0 && details.title) {
+				const completedStages = { ...state!.completedStages, plan: planContent };
+				const slug = await this.#resolveWorkflowSlug(details.title);
+				await this.#persistStagesToDocs(slug, completedStages);
+			}
+			const finalPlanFilePath = details.finalPlanFilePath ?? details.planFilePath;
 			try {
-				await this.#approvePlan(planContent, { planFilePath, finalPlanFilePath });
+				await this.#approvePlan(planContent, { planFilePath: details.planFilePath, finalPlanFilePath });
 			} catch (error) {
 				this.showError(
 					`Failed to finalize approved plan: ${error instanceof Error ? error.message : String(error)}`,
@@ -856,6 +989,76 @@ export class InteractiveMode implements InteractiveModeContext {
 				this.editor.setText(refinement);
 			}
 		}
+		// "Stay in plan mode": agent continues
+	}
+
+	async #persistStagesToDocs(slug: string, completedStages: Partial<Record<string, string>>): Promise<void> {
+		const cwd = this.sessionManager.getCwd();
+		for (const [stage, content] of Object.entries(completedStages)) {
+			if (content) {
+				await writeWorkflowArtifact(cwd, slug, stage, content);
+			}
+		}
+	}
+
+	async #resolveWorkflowSlug(title: string): Promise<string> {
+		const generated = generateSlug(title);
+		const override = await this.showHookInput(
+			`Save to docs/workflow/${generated}/ (enter to confirm or type a different slug)`,
+			generated,
+		);
+		return override?.trim() || generated;
+	}
+
+	// Stub implementation — Phase 4 will dispatch a real critic agent.
+	// Returns true (approve) by default; returns false on quality failure.
+	async #criticReviewStage(_stageName: string, _content: string): Promise<boolean> {
+		return true;
+	}
+
+	async handleReadOnlyCommand(): Promise<void> {
+		if (this.session.getReadOnlyMode()) {
+			this.session.setReadOnlyMode(false);
+			// Retract the read-only directive so the model knows it can now write.
+			await this.session.sendReadOnlyDisabledContext({ deliverAs: "steer" });
+			this.showStatus("Read-only mode disabled.");
+			this.#updatePlanModeStatus();
+			return;
+		}
+		if (this.planModeEnabled) {
+			const variant = this.session.getPlanModeState()?.autoMode ? "auto" : "plan";
+			this.showError(
+				`${variant.charAt(0).toUpperCase() + variant.slice(1)} mode is active. Exit it first with /${variant}.`,
+			);
+			return;
+		}
+		this.session.setReadOnlyMode(true);
+		await this.session.sendReadOnlyContext({ deliverAs: "steer" });
+		this.showStatus("Read-only mode enabled. File writes and bash execution blocked.");
+		this.#updatePlanModeStatus();
+	}
+
+	async handleWorkflowConfigCommand(): Promise<void> {
+		const optionalStages: Array<{
+			key: "planning.stages.understand" | "planning.stages.design" | "planning.stages.review";
+			label: string;
+		}> = [
+			{ key: "planning.stages.understand", label: "understand" },
+			{ key: "planning.stages.design", label: "design" },
+			{ key: "planning.stages.review", label: "review" },
+		];
+
+		for (const { key, label } of optionalStages) {
+			const current = settings.get(key);
+			const confirmed = await this.showHookConfirm(
+				`Enable "${label}" stage?`,
+				`Currently: ${current ? "ON" : "OFF"}. The "plan" stage is always enabled.`,
+			);
+			settings.set(key, confirmed);
+		}
+
+		const active = this.#resolveActiveStages();
+		this.showStatus(`Planning stages configured: ${active.join(" -> ")}`);
 	}
 
 	stop(): void {
