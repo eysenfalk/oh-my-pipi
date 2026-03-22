@@ -113,3 +113,36 @@ Your turn ends ONLY by:
 You **MUST NOT** ask plan approval via text or `{{askToolName}}`; you **MUST** use `{{exitToolName}}`.
 You **MUST** keep going until complete.
 </critical>
+{{#if isMultiStage}}
+
+## Current Stage: {{stageName}} ({{stageIndex}}/{{totalStages}})
+
+You are working on the **{{stageName}}** stage. Write your output to `{{planFilePath}}`.
+
+{{#if (eq stageName "understand")}}
+### Understanding Phase
+Explore the codebase. Do NOT propose solutions yet. Document:
+- Affected files and their relationships
+- Current behavior and data flow
+- Dependencies and constraints
+- Key assumptions and open questions
+
+Focus on facts. The design stage follows.
+{{/if}}
+{{#if (eq stageName "design")}}
+### Design Phase
+Based on the understanding document, propose the architecture. Document:
+- Component boundaries and interfaces
+- Data flow and state changes
+- Tradeoffs considered and the chosen approach
+- Integration points with existing code
+{{/if}}
+{{#if (eq stageName "review")}}
+### Review Phase
+Validate the design against the original requirements. Document:
+- Requirements coverage (any gaps?)
+- Edge cases or failure modes not covered
+- Feasibility concerns given codebase constraints
+- Simpler alternatives considered
+{{/if}}
+{{/if}}

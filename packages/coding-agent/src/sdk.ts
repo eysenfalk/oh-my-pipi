@@ -877,6 +877,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			return undefined;
 		},
 		getPlanModeState: () => session.getPlanModeState(),
+		getReadOnlyMode: () => session.getReadOnlyMode(),
 		getCompactContext: () => session.formatCompactContext(),
 		getTodoPhases: () => session.getTodoPhases(),
 		setTodoPhases: phases => session.setTodoPhases(phases),

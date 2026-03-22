@@ -269,6 +269,11 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 		onUpdate?: AgentToolUpdateCallback<BashToolDetails>,
 		ctx?: AgentToolContext,
 	): Promise<AgentToolResult<BashToolDetails>> {
+		if (this.session.getReadOnlyMode?.()) {
+			throw new ToolError(
+				"Read-only mode: bash execution is not allowed. Use read, grep, find, or lsp for exploration.",
+			);
+		}
 		let command = rawCommand;
 		const env = normalizeBashEnv(rawEnv);
 

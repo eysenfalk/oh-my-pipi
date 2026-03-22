@@ -101,6 +101,14 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<BuiltinSlashCommandSpec> = [
 		},
 	},
 	{
+		name: "read-only",
+		description: "Toggle read-only mode (blocks all file writes and bash commands)",
+		handle: async (_command, runtime) => {
+			await runtime.ctx.handleReadOnlyCommand();
+			runtime.ctx.editor.setText("");
+		},
+	},
+	{
 		name: "model",
 		aliases: ["models"],
 		description: "Select model (opens selector UI)",

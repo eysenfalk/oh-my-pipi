@@ -1,0 +1,1 @@
+Read-only mode has been **disabled**. You may now freely use all tools, including file writes (`write`, `edit`, `patch`) and bash execution.

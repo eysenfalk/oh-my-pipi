@@ -38,6 +38,7 @@ function createPathContext(): SegmentContext {
 			premiumRequests: 0,
 			cost: 0,
 			tokensPerSecond: null,
+			hitRate: null,
 		},
 		contextPercent: 0,
 		contextWindow: 0,

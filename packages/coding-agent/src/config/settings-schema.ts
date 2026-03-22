@@ -1576,6 +1576,39 @@ export const SETTINGS_SCHEMA = {
 
 	"commit.changelogMaxDiffChars": { type: "number", default: 120000 },
 
+	"planning.stages.understand": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "tasks",
+			label: "Understanding Stage",
+			description: "Explore codebase and document findings before designing",
+			submenu: true,
+		},
+	},
+
+	"planning.stages.design": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "tasks",
+			label: "Design Stage",
+			description: "Propose architecture and make design decisions before planning",
+			submenu: true,
+		},
+	},
+
+	"planning.stages.review": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "tasks",
+			label: "Review Stage",
+			description: "Validate design against requirements before final plan",
+			submenu: true,
+		},
+	},
+
 	"thinkingBudgets.minimal": { type: "number", default: 1024 },
 
 	"thinkingBudgets.low": { type: "number", default: 2048 },
