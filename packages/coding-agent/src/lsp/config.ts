@@ -11,9 +11,12 @@ import type { ServerConfig } from "./types";
 
 export interface LspConfig {
 	servers: Record<string, ServerConfig>;
-	/** Idle timeout in milliseconds. If set, LSP clients will be shutdown after this period of inactivity. Disabled by default. */
+	/** Idle timeout in milliseconds. LSP clients are shut down after this period of inactivity. Defaults to 5 minutes. Set to 0 to disable. */
 	idleTimeoutMs?: number;
 }
+
+/** Default idle timeout: 5 minutes. Reclaims 50-200MB per idle LSP server process. */
+const DEFAULT_IDLE_TIMEOUT_MS = 300_000;
 
 // =============================================================================
 // Default Server Configuration Loading
@@ -323,7 +326,7 @@ export function loadConfig(cwd: string): LspConfig {
 			detected[name] = { ...config, resolvedCommand: resolved };
 		}
 
-		return { servers: detected, idleTimeoutMs };
+		return { servers: detected, idleTimeoutMs: idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS };
 	}
 
 	// Merge overrides with defaults and filter to available servers
@@ -338,7 +341,7 @@ export function loadConfig(cwd: string): LspConfig {
 		available[name] = { ...config, resolvedCommand: resolved };
 	}
 
-	return { servers: available, idleTimeoutMs };
+	return { servers: available, idleTimeoutMs: idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS };
 }
 
 // =============================================================================
