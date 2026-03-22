@@ -1,5 +1,6 @@
 import { extractMermaidBlocks, logger, renderMermaidAsciiSafe } from "@oh-my-pi/pi-utils";
 
+const MAX_CACHE_ENTRIES = 128;
 const cache = new Map<bigint, string>();
 const failed = new Set<bigint>();
 
@@ -36,6 +37,10 @@ export function prerenderMermaid(markdown: string): void {
 		const ascii = renderMermaidAsciiSafe(source);
 		if (ascii) {
 			cache.set(hash, ascii);
+			if (cache.size > MAX_CACHE_ENTRIES) {
+				const oldest = cache.keys().next().value;
+				if (oldest !== undefined) cache.delete(oldest);
+			}
 			hasNew = true;
 		} else {
 			failed.add(hash);

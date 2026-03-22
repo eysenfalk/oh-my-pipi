@@ -8,7 +8,8 @@
  * - pi://<file>.md - Reads a specific documentation file
  */
 import * as path from "node:path";
-import { EMBEDDED_DOC_FILENAMES, EMBEDDED_DOCS } from "./docs-index.generated";
+import { EMBEDDED_DOC_FILENAMES } from "./docs-index.generated";
+import { readDocContent } from "./docs-reader";
 import type { InternalResource, InternalUrl, ProtocolHandler } from "./types";
 
 /**
@@ -60,7 +61,7 @@ export class PiProtocolHandler implements ProtocolHandler {
 			throw new Error("Path traversal (..) is not allowed in pi:// URLs");
 		}
 
-		const content = EMBEDDED_DOCS[normalized];
+		const content = await readDocContent(normalized);
 		if (content === undefined) {
 			const lookup = normalized.replace(/\.md$/, "");
 			const suggestions = EMBEDDED_DOC_FILENAMES.filter(
