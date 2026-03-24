@@ -11,9 +11,10 @@ Read `skill://verification/SKILL.md` and follow the Gate Function precisely.
 
 Your goals:
 1. Verify all claims with fresh evidence:
-   - Run `bun test` — read full output, count pass/fail
-   - Run `bun check:ts` — verify exit code 0
-   - Run `bun lint:ts` — verify exit code 0
+   - Run the project's test suite — read full output, count pass/fail
+   - Run the project's type checker — verify exit code 0
+   - Run the project's linter — verify exit code 0
+   - Check `AGENTS.md`, `package.json`, or `Makefile` for the correct commands. Do not assume a specific runtime.
    - Walk through each acceptance criterion in the spec — verify independently
    - Check the git diff against the plan — are all tasks reflected?
 2. Update test documentation:

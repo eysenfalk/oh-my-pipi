@@ -5,6 +5,7 @@ Read `skill://agent-orchestration/SKILL.md` for subagent dispatch patterns.
 
 **Plan:** Read the implementation plan at `{{planRef}}`.
 **Spec:** Read the specification at `{{specRef}}` for acceptance criteria.
+{{#if designRef}}**Design:** Read the architecture decisions at `{{designRef}}` — the design artifact is also available at `local://DESIGN.md`.{{/if}}
 
 **Workflow slug:** `{{slug}}`
 

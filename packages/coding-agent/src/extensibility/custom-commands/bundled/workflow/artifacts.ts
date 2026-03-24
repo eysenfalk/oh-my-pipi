@@ -1,20 +1,22 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import { isEnoent } from "@oh-my-pi/pi-utils";
+import { isEnoent, logger } from "@oh-my-pi/pi-utils";
 
-const WORKFLOW_DIR = "docs/workflow";
+export const WORKFLOW_DIR = "docs/workflow";
+
+const ACTIVE_FILE = ".active";
 
 export interface WorkflowState {
 	slug: string;
-	currentPhase: string;
-	artifacts: Record<string, string>;
-	activePhases?: string[];
+	currentPhase: WorkflowPhase;
+	artifacts: Partial<Record<WorkflowPhase, string>>;
+	activePhases?: WorkflowPhase[];
+	status?: "active" | "abandoned";
 }
 
-const PHASES = ["brainstorm", "spec", "design", "plan", "execute", "verify", "finish"] as const;
+export const PHASES = ["brainstorm", "spec", "design", "plan", "execute", "verify", "finish"] as const;
 export type WorkflowPhase = (typeof PHASES)[number];
 
-/** Resolve the workflow directory for a given slug */
 export function resolveWorkflowDir(cwd: string, slug: string): string {
 	return path.join(cwd, WORKFLOW_DIR, slug);
 }
@@ -33,18 +35,19 @@ export async function readWorkflowArtifact(cwd: string, slug: string, phase: str
 export async function writeWorkflowArtifact(
 	cwd: string,
 	slug: string,
-	phase: string,
+	phase: WorkflowPhase,
 	content: string,
-	activePhases?: string[],
+	activePhases?: WorkflowPhase[],
 ): Promise<void> {
 	const dir = resolveWorkflowDir(cwd, slug);
 	await fs.mkdir(dir, { recursive: true });
-	await Bun.write(path.join(dir, `${phase}.md`), content);
 
+	// Write state first — worst case on crash: state references phase with no artifact file,
+	// which readWorkflowArtifact handles by returning null.
 	const state = (await readWorkflowState(cwd, slug)) ?? {
 		slug,
 		currentPhase: phase,
-		artifacts: {},
+		artifacts: {} as Partial<Record<WorkflowPhase, string>>,
 	};
 	state.currentPhase = phase;
 	state.artifacts[phase] = path.join(WORKFLOW_DIR, slug, `${phase}.md`);
@@ -52,10 +55,11 @@ export async function writeWorkflowArtifact(
 		state.activePhases = activePhases;
 	}
 	await Bun.write(path.join(dir, "state.json"), JSON.stringify(state, null, 2));
+	await Bun.write(path.join(dir, `${phase}.md`), content);
 }
 
 /** Update only the activePhases field in workflow state */
-export async function updateWorkflowActivePhases(cwd: string, slug: string, phases: string[]): Promise<void> {
+export async function updateWorkflowActivePhases(cwd: string, slug: string, phases: WorkflowPhase[]): Promise<void> {
 	const dir = resolveWorkflowDir(cwd, slug);
 	await fs.mkdir(dir, { recursive: true });
 	const state = (await readWorkflowState(cwd, slug)) ?? {
@@ -70,7 +74,15 @@ export async function updateWorkflowActivePhases(cwd: string, slug: string, phas
 /** Read the workflow state file */
 export async function readWorkflowState(cwd: string, slug: string): Promise<WorkflowState | null> {
 	try {
-		return await Bun.file(path.join(resolveWorkflowDir(cwd, slug), "state.json")).json();
+		const state = (await Bun.file(path.join(resolveWorkflowDir(cwd, slug), "state.json")).json()) as WorkflowState;
+		if (!PHASES.includes(state.currentPhase as WorkflowPhase)) {
+			logger.warn("Invalid currentPhase in workflow state, defaulting to brainstorm", {
+				slug,
+				currentPhase: state.currentPhase,
+			});
+			state.currentPhase = "brainstorm";
+		}
+		return state;
 	} catch (err) {
 		if (isEnoent(err)) return null;
 		throw err;
@@ -95,6 +107,12 @@ export async function listWorkflows(cwd: string): Promise<string[]> {
 
 /** Find the most recent workflow slug that has a state.json */
 export async function findActiveWorkflow(cwd: string): Promise<string | null> {
+	const active = await getActiveWorkflowSlug(cwd);
+	if (active) {
+		const state = await readWorkflowState(cwd, active);
+		if (state) return active;
+	}
+	// Fallback: most recent by date
 	const slugs = await listWorkflows(cwd);
 	for (const slug of slugs) {
 		const state = await readWorkflowState(cwd, slug);
@@ -141,16 +159,51 @@ export async function persistPhaseLearnings(cwd: string, slug: string, phase: st
 	}
 }
 
-/** Update the current phase in the workflow state without writing an artifact */
-export async function setActiveWorkflowPhase(cwd: string, slug: string, phase: string): Promise<void> {
+/** Create initial workflow state */
+export async function createWorkflowState(cwd: string, slug: string, activePhases?: WorkflowPhase[]): Promise<void> {
 	const dir = resolveWorkflowDir(cwd, slug);
 	await fs.mkdir(dir, { recursive: true });
+	const initial: WorkflowState = { slug, currentPhase: "brainstorm", artifacts: {} };
+	if (activePhases) initial.activePhases = activePhases;
+	await Bun.write(path.join(dir, "state.json"), JSON.stringify(initial, null, 2));
+}
 
-	const state = (await readWorkflowState(cwd, slug)) ?? {
-		slug,
-		currentPhase: phase,
-		artifacts: {},
-	};
-	state.currentPhase = phase;
-	await Bun.write(path.join(dir, "state.json"), JSON.stringify(state, null, 2));
+/** Read the active workflow slug from the .active file */
+export async function getActiveWorkflowSlug(cwd: string): Promise<string | null> {
+	try {
+		const text = (await Bun.file(path.join(cwd, WORKFLOW_DIR, ACTIVE_FILE)).text()).trim();
+		return text || null;
+	} catch (err) {
+		if (isEnoent(err)) return null;
+		throw err;
+	}
+}
+
+/** Write or clear the active workflow slug in the .active file */
+export async function setActiveWorkflowSlug(cwd: string, slug: string | null): Promise<void> {
+	const filePath = path.join(cwd, WORKFLOW_DIR, ACTIVE_FILE);
+	if (slug === null) {
+		try {
+			await fs.unlink(filePath);
+		} catch (err) {
+			if (!isEnoent(err)) throw err;
+		}
+	} else {
+		await Bun.write(filePath, slug);
+	}
+}
+
+/** Get the next phase in the workflow sequence, respecting activePhases filter */
+export function getNextPhase(state: WorkflowState): WorkflowPhase | null {
+	const currentIdx = PHASES.indexOf(state.currentPhase);
+	if (currentIdx === -1) return null;
+	for (let i = currentIdx + 1; i < PHASES.length; i++) {
+		const phase = PHASES[i];
+		if (state.activePhases) {
+			if (state.activePhases.includes(phase)) return phase;
+		} else {
+			return phase; // No activePhases filter = all enabled
+		}
+	}
+	return null;
 }

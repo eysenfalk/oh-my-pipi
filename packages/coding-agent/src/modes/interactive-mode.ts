@@ -11,8 +11,8 @@ import { APP_NAME, getProjectDir, hsvToRgb, isEnoent, logger, postmortem } from 
 import chalk from "chalk";
 import { KeybindingsManager } from "../config/keybindings";
 import { renderPromptTemplate } from "../config/prompt-templates";
-import { type Settings, settings } from "../config/settings";
-import { type ApprovalContext, runApprovalGate } from "../extensibility/custom-commands/bundled/workflow/approval";
+import { type SettingPath, type Settings, settings } from "../config/settings";
+import { type ApprovalContext, type ApprovalResult, runApprovalGate, runUserApproval } from "../extensibility/custom-commands/bundled/workflow/approval";
 import {
 	generateSlug,
 	readWorkflowState,
@@ -162,6 +162,7 @@ export class InteractiveMode implements InteractiveModeContext {
 	#activeWorkflowPhase: string | null = null;
 	#activeWorkflowPhases: string[] | null = null;
 	#proposedWorkflowPhases: { phases: string[]; rationale: string } | null = null;
+	#reviewRoundCount = new Map<string, number>();
 	readonly lspServers:
 		| Array<{ name: string; status: "ready" | "error"; fileTypes: string[]; error?: string }>
 		| undefined = undefined;
@@ -804,6 +805,11 @@ export class InteractiveMode implements InteractiveModeContext {
 	async handleExitPlanModeTool(details: ExitPlanModeDetails): Promise<void> {
 		// Workflow phase completion (agent passed workflowSlug + workflowPhase)
 		if (details.workflowSlug && details.workflowPhase) {
+			const validPhases = ["brainstorm", "spec", "design", "plan", "execute", "verify", "finish"];
+			if (!validPhases.includes(details.workflowPhase)) {
+				this.showWarning(`Unknown workflow phase "${details.workflowPhase}". Ignoring.`);
+				return;
+			}
 			await this.session.abort();
 			await this.#handleWorkflowPhaseComplete(details.workflowSlug, details.workflowPhase as WorkflowPhase, details);
 			return;
@@ -925,7 +931,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.#renderPlanPreview(content);
 
 		// For brainstorm phase: show phase proposal confirmation before approval gate
-		let approvedPhases: string[] | undefined;
+		let approvedPhases: WorkflowPhase[] | undefined;
 		if (phase === "brainstorm" && this.#proposedWorkflowPhases) {
 			const proposal = this.#proposedWorkflowPhases;
 			this.#proposedWorkflowPhases = null; // Clear immediately
@@ -938,37 +944,74 @@ export class InteractiveMode implements InteractiveModeContext {
 			]);
 
 			if (choice === "Accept") {
-				approvedPhases = proposal.phases;
+				approvedPhases = proposal.phases as WorkflowPhase[];
 			} else if (choice === "Edit phases") {
 				const edited = await this.showHookInput("Edit phases (space or comma separated)", phaseList);
 				if (edited) {
 					approvedPhases = edited
-						.split(/[\s,→]+/)
+						.split(/[\s,\u2192]+/)
 						.map(s => s.trim())
-						.filter(Boolean);
+						.filter(Boolean) as WorkflowPhase[];
 				}
 			}
 			// "Reject": approvedPhases stays undefined → global settings used
 		}
-
 		const approvalCtx: ApprovalContext = {
 			select: (title, options) => this.showHookSelector(title, options),
 			input: (title, placeholder) => this.showHookInput(title, placeholder),
 		};
 
+		const roundKey = `${slug}/${phase}`;
+
+		// If agent review is complete (or reviewCompleted sent without prior review), go straight to user approval
+		if (details.reviewCompleted) {
+			const result = await runUserApproval(phase, approvalCtx);
+			this.#reviewRoundCount.delete(roundKey);
+			return this.#handleApprovalResult(slug, phase, phasePlanFilePath, content, approvedPhases, result, details);
+		}
+
 		const result = await runApprovalGate(phase, approvalCtx);
 
 		if (result.reviewPrompt) {
+			// Track review rounds to enforce max iterations
+			const currentRound = (this.#reviewRoundCount.get(roundKey) ?? 0) + 1;
+			const maxRoundsStr = settings.get(`workflow.phases.${phase}.maxReviewRounds` as SettingPath) as string;
+			const maxRounds = (() => { const n = parseInt(maxRoundsStr, 10); return Number.isNaN(n) || n < 1 ? 3 : n; })();
+
+			if (currentRound >= maxRounds) {
+				// Max rounds reached — escalate to user approval
+				this.showWarning(`Maximum ${maxRounds} review round${maxRounds === 1 ? "" : "s"} reached. Escalating to user approval.`);
+				const escalated = await runUserApproval(phase, approvalCtx);
+				this.#reviewRoundCount.delete(roundKey);
+				return this.#handleApprovalResult(slug, phase, phasePlanFilePath, content, approvedPhases, escalated, details);
+			}
+
+			this.#reviewRoundCount.set(roundKey, currentRound);
 			if (this.onInputCallback) {
 				this.onInputCallback(this.startPendingSubmission({ text: result.reviewPrompt }));
 			}
 			return;
 		}
 
+		// Non-review result (user approval or no-approval mode)
+		this.#reviewRoundCount.delete(roundKey);
+		return this.#handleApprovalResult(slug, phase, phasePlanFilePath, content, approvedPhases, result, details);
+	}
+
+	async #handleApprovalResult(
+		slug: string,
+		phase: WorkflowPhase,
+		phasePlanFilePath: string,
+		content: string,
+		approvedPhases: WorkflowPhase[] | undefined,
+		result: ApprovalResult,
+		details: ExitPlanModeDetails,
+	): Promise<void> {
 		if (!result.approved) {
 			const reason = "reason" in result ? result.reason : undefined;
-			if (reason) {
-				this.editor.setText(reason);
+			if (reason && this.onInputCallback) {
+				// Submit refinement/rejection as a message so the agent acts on it
+				this.onInputCallback(this.startPendingSubmission({ text: reason }));
 			}
 			return;
 		}

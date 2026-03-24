@@ -14,6 +14,11 @@ const exitPlanModeSchema = Type.Object({
 	),
 	workflowSlug: Type.Optional(Type.String({ description: "Active workflow slug (for workflow phases)" })),
 	workflowPhase: Type.Optional(Type.String({ description: "Current workflow phase name (for workflow phases)" })),
+	reviewCompleted: Type.Optional(
+		Type.Boolean({
+			description: "Set to true after agent review is complete. Signals the system to proceed to user approval.",
+		}),
+	),
 });
 
 type ExitPlanModeParams = Static<typeof exitPlanModeSchema>;
@@ -44,6 +49,7 @@ export interface ExitPlanModeDetails {
 	finalPlanFilePath?: string;
 	workflowSlug?: string;
 	workflowPhase?: string;
+	reviewCompleted?: boolean;
 }
 
 export class ExitPlanModeTool implements AgentTool<typeof exitPlanModeSchema, ExitPlanModeDetails> {
@@ -119,6 +125,7 @@ export class ExitPlanModeTool implements AgentTool<typeof exitPlanModeSchema, Ex
 				finalPlanFilePath: isWorkflowPhase ? undefined : finalPlanFilePath,
 				workflowSlug: params.workflowSlug,
 				workflowPhase: params.workflowPhase,
+				reviewCompleted: params.reviewCompleted,
 			},
 		};
 	}
