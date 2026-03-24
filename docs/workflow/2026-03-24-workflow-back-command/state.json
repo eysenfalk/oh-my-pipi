@@ -1,7 +1,8 @@
 {
   "slug": "2026-03-24-workflow-back-command",
-  "currentPhase": "brainstorm",
+  "currentPhase": "plan",
   "artifacts": {
-    "brainstorm": "docs/workflow/2026-03-24-workflow-back-command/brainstorm.md"
+    "brainstorm": "docs/workflow/2026-03-24-workflow-back-command/brainstorm.md",
+    "plan": "docs/workflow/2026-03-24-workflow-back-command/plan.md"
   }
 }
