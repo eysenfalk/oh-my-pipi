@@ -1,6 +1,7 @@
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { renderPromptTemplate } from "../../../../config/prompt-templates";
-import type { SettingPath, SettingValue } from "../../../../config/settings";
+import type { SettingPath } from "../../../../config/settings";
 import { settings } from "../../../../config/settings";
 import type { HookCommandContext } from "../../../hooks/types";
 import type { CustomCommand } from "../../types";
@@ -10,9 +11,10 @@ import {
 	generateSlug,
 	readWorkflowArtifact,
 	readWorkflowState,
+	type WorkflowPhase,
 	type WorkflowState,
 } from "./artifacts";
-
+import { createWorkflowConfigComponent } from "./config-component";
 import brainstormPrompt from "./prompts/brainstorm-start.md" with { type: "text" };
 import designPrompt from "./prompts/design-start.md" with { type: "text" };
 import executePrompt from "./prompts/execute-start.md" with { type: "text" };
@@ -36,27 +38,11 @@ export class WorkflowCommand implements CustomCommand {
 
 		switch (subcommand) {
 			case "config": {
-				const stages: ReadonlyArray<{ key: SettingPath; label: string }> = [
-					{ key: "planning.stages.understand" as SettingPath, label: "understand" },
-					{ key: "planning.stages.design" as SettingPath, label: "design" },
-					{ key: "planning.stages.review" as SettingPath, label: "review" },
-				];
 				if (!ctx.hasUI) {
-					const active = stages.filter(s => settings.get(s.key)).map(s => s.label);
-					active.push("plan");
-					return `Planning stages: ${active.join(" → ")} (use in interactive mode to configure)`;
+					return "Use in interactive mode to configure workflow phases.";
 				}
-				for (const { key, label } of stages) {
-					const current = settings.get(key) as boolean;
-					const confirmed = await ctx.ui.confirm(
-						`Enable "${label}" stage?`,
-						`Currently: ${current ? "ON" : "OFF"}. The "plan" stage is always enabled.`,
-					);
-					settings.set(key, confirmed as SettingValue<SettingPath>);
-				}
-				const configured = stages.filter(s => settings.get(s.key)).map(s => s.label);
-				configured.push("plan");
-				return `Planning stages configured: ${configured.join(" → ")}`;
+				await ctx.ui.custom((_tui, _theme, done) => createWorkflowConfigComponent(done));
+				return undefined;
 			}
 			case "brainstorm":
 				return this.#startBrainstorm(rest, ctx);
@@ -105,7 +91,7 @@ export class WorkflowCommand implements CustomCommand {
 		const workflowDir = path.join(WORKFLOW_DIR, slug);
 
 		await ctx.newSession();
-		return renderPromptTemplate(brainstormPrompt, { topic, workflowDir });
+		return renderPromptTemplate(brainstormPrompt, { topic, workflowDir, slug, workflowPhase: "brainstorm" });
 	}
 
 	async #resolveSlug(rest: string[], ctx: HookCommandContext): Promise<string | null> {
@@ -121,11 +107,14 @@ export class WorkflowCommand implements CustomCommand {
 		const slug = await this.#resolveSlug(rest, ctx);
 		if (!slug) return "No workflow slug specified and no active workflow found.";
 
+		const prereqError = await this.#checkPrereq(ctx.cwd, slug, "brainstorm");
+		if (prereqError) return prereqError;
+
 		const workflowDir = path.join(WORKFLOW_DIR, slug);
 		const brainstormRef = await this.#artifactRef(ctx.cwd, slug, "brainstorm");
-
-		await ctx.newSession();
-		return renderPromptTemplate(specPrompt, { workflowDir, brainstormRef });
+		const setup = await this.#populateLocalSetup(ctx.cwd, slug, ["brainstorm"]);
+		await ctx.newSession({ setup });
+		return renderPromptTemplate(specPrompt, { workflowDir, brainstormRef, slug, workflowPhase: "spec" });
 	}
 
 	async #startDesign(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
@@ -138,8 +127,9 @@ export class WorkflowCommand implements CustomCommand {
 
 		if (!specRef) return `No spec artifact found for workflow "${slug}". Run the spec phase first.`;
 
-		await ctx.newSession();
-		return renderPromptTemplate(designPrompt, { workflowDir, specRef, brainstormRef });
+		const setup = await this.#populateLocalSetup(ctx.cwd, slug, ["brainstorm", "spec"]);
+		await ctx.newSession({ setup });
+		return renderPromptTemplate(designPrompt, { workflowDir, specRef, brainstormRef, slug, workflowPhase: "design" });
 	}
 
 	async #startPlan(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
@@ -152,8 +142,9 @@ export class WorkflowCommand implements CustomCommand {
 
 		if (!specRef) return `No spec artifact found for workflow "${slug}". Run the spec phase first.`;
 
-		await ctx.newSession();
-		return renderPromptTemplate(planPrompt, { workflowDir, specRef, designRef });
+		const setup = await this.#populateLocalSetup(ctx.cwd, slug, ["brainstorm", "spec", "design"]);
+		await ctx.newSession({ setup });
+		return renderPromptTemplate(planPrompt, { workflowDir, specRef, designRef, slug, workflowPhase: "plan" });
 	}
 
 	async #startExecute(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
@@ -165,8 +156,9 @@ export class WorkflowCommand implements CustomCommand {
 
 		if (!planRef) return `No plan artifact found for workflow "${slug}". Run the plan phase first.`;
 
-		await ctx.newSession();
-		return renderPromptTemplate(executePrompt, { planRef, specRef });
+		const setup = await this.#populateLocalSetup(ctx.cwd, slug, ["brainstorm", "spec", "design", "plan"]);
+		await ctx.newSession({ setup });
+		return renderPromptTemplate(executePrompt, { planRef, specRef, slug, workflowPhase: "execute" });
 	}
 
 	async #startVerify(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
@@ -178,16 +170,31 @@ export class WorkflowCommand implements CustomCommand {
 
 		if (!specRef) return `No spec artifact found for workflow "${slug}".`;
 
-		await ctx.newSession();
-		return renderPromptTemplate(verifyPrompt, { specRef, planRef });
+		const prereqError = await this.#checkPrereq(ctx.cwd, slug, "execute");
+		if (prereqError) return prereqError;
+
+		const setup = await this.#populateLocalSetup(ctx.cwd, slug, ["brainstorm", "spec", "design", "plan", "execute"]);
+		await ctx.newSession({ setup });
+		return renderPromptTemplate(verifyPrompt, { specRef, planRef, slug, workflowPhase: "verify" });
 	}
 
 	async #startFinish(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
 		const slug = await this.#resolveSlug(rest, ctx);
 		if (!slug) return "No workflow slug specified and no active workflow found.";
 
-		await ctx.newSession();
-		return renderPromptTemplate(finishPrompt, {});
+		const prereqError = await this.#checkPrereq(ctx.cwd, slug, "verify");
+		if (prereqError) return prereqError;
+
+		const setup = await this.#populateLocalSetup(ctx.cwd, slug, [
+			"brainstorm",
+			"spec",
+			"design",
+			"plan",
+			"execute",
+			"verify",
+		]);
+		await ctx.newSession({ setup });
+		return renderPromptTemplate(finishPrompt, { slug, workflowPhase: "finish" });
 	}
 
 	async #resume(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
@@ -223,16 +230,60 @@ export class WorkflowCommand implements CustomCommand {
 	}
 
 	#getNextPhase(state: WorkflowState): string | null {
-		const order = ["brainstorm", "spec", "design", "plan", "execute", "verify", "finish"];
-		const currentIdx = order.indexOf(state.currentPhase);
-		if (currentIdx === -1 || currentIdx >= order.length - 1) return null;
-		return order[currentIdx + 1];
+		const order: WorkflowPhase[] = ["brainstorm", "spec", "design", "plan", "execute", "verify", "finish"];
+		const currentIdx = order.indexOf(state.currentPhase as WorkflowPhase);
+		if (currentIdx === -1) return null;
+
+		for (let i = currentIdx + 1; i < order.length; i++) {
+			const phase = order[i];
+			const enabled = settings.get(`workflow.phases.${phase}.enabled` as SettingPath);
+			if (enabled !== false) {
+				return phase;
+			}
+		}
+		return null;
 	}
 
 	async #artifactRef(cwd: string, slug: string, phase: string): Promise<string | null> {
 		const content = await readWorkflowArtifact(cwd, slug, phase);
 		if (!content) return null;
 		return path.join(WORKFLOW_DIR, slug, `${phase}.md`);
+	}
+
+	/** Check if a prerequisite phase has a persisted artifact, respecting whether the phase is enabled. */
+	async #checkPrereq(cwd: string, slug: string, prereq: WorkflowPhase): Promise<string | null> {
+		const enabled = settings.get(`workflow.phases.${prereq}.enabled` as SettingPath);
+		if (enabled === false) return null;
+		const content = await readWorkflowArtifact(cwd, slug, prereq);
+		if (!content)
+			return `Phase "${prereq}" has not been completed for workflow "${slug}". Run /workflow ${prereq} first.`;
+		return null;
+	}
+
+	/**
+	 * Pre-reads all requested phase artifacts and returns a newSession setup callback
+	 * that writes them into the new session's local:// space as PHASE.md files.
+	 * This lets the incoming agent read local://BRAINSTORM.md etc. directly.
+	 */
+	async #populateLocalSetup(
+		cwd: string,
+		slug: string,
+		phases: WorkflowPhase[],
+	): Promise<(sm: { getArtifactsDir(): string | null }) => Promise<void>> {
+		const artifacts: Array<{ phase: WorkflowPhase; content: string }> = [];
+		for (const phase of phases) {
+			const content = await readWorkflowArtifact(cwd, slug, phase);
+			if (content) artifacts.push({ phase, content });
+		}
+		return async sm => {
+			const artifactsDir = sm.getArtifactsDir();
+			if (!artifactsDir) return;
+			const localDir = path.join(artifactsDir, "local");
+			await fs.mkdir(localDir, { recursive: true });
+			for (const { phase, content } of artifacts) {
+				await Bun.write(path.join(localDir, `${phase.toUpperCase()}.md`), content);
+			}
+		};
 	}
 }
 

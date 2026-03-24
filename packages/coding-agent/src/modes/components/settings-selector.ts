@@ -183,14 +183,20 @@ export class SettingsSelectorComponent extends Container {
 	constructor(
 		private readonly context: SettingsRuntimeContext,
 		private readonly callbacks: SettingsCallbacks,
+		initialTab: SettingTab | "plugins" = "appearance",
 	) {
 		super();
 
 		// Add top border
 		this.addChild(new DynamicBorder());
 
-		// Tab bar
-		this.#tabBar = new TabBar("Settings", getSettingsTabs(), getTabBarTheme());
+		// Tab bar — start on the requested tab
+		const allTabs = getSettingsTabs();
+		const initialIndex = Math.max(
+			0,
+			allTabs.findIndex(t => t.id === initialTab),
+		);
+		this.#tabBar = new TabBar("Settings", allTabs, getTabBarTheme(), initialIndex);
 		this.#tabBar.onTabChange = () => {
 			this.#switchToTab(this.#tabBar.getActiveTab().id as SettingTab | "plugins");
 		};
@@ -199,8 +205,8 @@ export class SettingsSelectorComponent extends Container {
 		// Spacer after tab bar
 		this.addChild(new Spacer(1));
 
-		// Initialize with first tab
-		this.#switchToTab("appearance");
+		// Initialize content for initial tab
+		this.#switchToTab(initialTab);
 
 		// Add bottom border
 		this.addChild(new DynamicBorder());

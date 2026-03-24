@@ -3,7 +3,6 @@ import type { AgentTool, AgentToolContext, AgentToolResult, AgentToolUpdateCallb
 import { isEnoent } from "@oh-my-pi/pi-utils";
 import { type Static, Type } from "@sinclair/typebox";
 import { renderPromptTemplate } from "../config/prompt-templates";
-import { currentStage, isLastStage } from "../plan-mode/state";
 import exitPlanModeDescription from "../prompts/tools/exit-plan-mode.md" with { type: "text" };
 import type { ToolSession } from ".";
 import { resolvePlanPath } from "./plan-mode-guard";
@@ -13,6 +12,8 @@ const exitPlanModeSchema = Type.Object({
 	title: Type.Optional(
 		Type.String({ description: "Final plan title — required only for the last stage, e.g. WP_MIGRATION_PLAN" }),
 	),
+	workflowSlug: Type.Optional(Type.String({ description: "Active workflow slug (for workflow phases)" })),
+	workflowPhase: Type.Optional(Type.String({ description: "Current workflow phase name (for workflow phases)" })),
 });
 
 type ExitPlanModeParams = Static<typeof exitPlanModeSchema>;
@@ -41,8 +42,8 @@ export interface ExitPlanModeDetails {
 	planExists: boolean;
 	title?: string;
 	finalPlanFilePath?: string;
-	isIntermediate: boolean;
-	currentStage: string;
+	workflowSlug?: string;
+	workflowPhase?: string;
 }
 
 export class ExitPlanModeTool implements AgentTool<typeof exitPlanModeSchema, ExitPlanModeDetails> {
@@ -64,14 +65,17 @@ export class ExitPlanModeTool implements AgentTool<typeof exitPlanModeSchema, Ex
 		_context?: AgentToolContext,
 	): Promise<AgentToolResult<ExitPlanModeDetails>> {
 		const state = this.session.getPlanModeState?.();
-		if (!state?.enabled) {
+		if (!state?.enabled && !state?.workflowSlug && !params.workflowSlug) {
 			throw new ToolError("Plan mode is not active.");
 		}
 
-		const stageName = currentStage(state);
-		const intermediate = !isLastStage(state);
+		const planFilePath =
+			state?.planFilePath ?? (params.workflowPhase ? `local://${params.workflowPhase.toUpperCase()}.md` : undefined);
+		if (!planFilePath) {
+			throw new ToolError("Cannot determine plan file path.");
+		}
 
-		const resolvedPlanPath = resolvePlanPath(this.session, state.planFilePath);
+		const resolvedPlanPath = resolvePlanPath(this.session, planFilePath);
 		let planExists = false;
 		try {
 			const stat = await fs.stat(resolvedPlanPath);
@@ -84,42 +88,37 @@ export class ExitPlanModeTool implements AgentTool<typeof exitPlanModeSchema, Ex
 
 		if (!planExists) {
 			throw new ToolError(
-				`Stage file not found at ${state.planFilePath}. Write the stage output to ${state.planFilePath} before calling exit_plan_mode.`,
+				`Plan file not found at ${planFilePath}. Write the output to ${planFilePath} before calling exit_plan_mode.`,
 			);
 		}
 
-		if (intermediate) {
-			return {
-				content: [{ type: "text", text: "Stage complete. Ready for review and advancement to next stage." }],
-				details: {
-					planFilePath: state.planFilePath,
-					planExists,
-					isIntermediate: true,
-					currentStage: stageName,
-				},
-			};
+		// For workflow phases, title is optional
+		const isWorkflowPhase = !!(params.workflowSlug && params.workflowPhase);
+		if (!params.title && !isWorkflowPhase) {
+			throw new ToolError('Title is required. Call exit_plan_mode({ title: "YOUR_PLAN_NAME" }).');
 		}
 
-		// Final stage: require title
-		if (!params.title) {
-			throw new ToolError(
-				'Title is required for the final plan stage. Call exit_plan_mode({ title: "YOUR_PLAN_NAME" }).',
-			);
-		}
-		const normalized = normalizePlanTitle(params.title);
+		const titleStr = params.title ?? params.workflowPhase!;
+		const normalized = normalizePlanTitle(titleStr);
 		const finalPlanFilePath = `local://${normalized.fileName}`;
-		// Validate the final path resolves correctly
-		resolvePlanPath(this.session, finalPlanFilePath);
+		if (!isWorkflowPhase) {
+			resolvePlanPath(this.session, finalPlanFilePath);
+		}
 
 		return {
-			content: [{ type: "text", text: "Plan ready for approval." }],
+			content: [
+				{
+					type: "text",
+					text: isWorkflowPhase ? "Phase complete. Ready for approval." : "Plan ready for approval.",
+				},
+			],
 			details: {
-				planFilePath: state.planFilePath,
+				planFilePath,
 				planExists,
 				title: normalized.title,
-				finalPlanFilePath,
-				isIntermediate: false,
-				currentStage: stageName,
+				finalPlanFilePath: isWorkflowPhase ? undefined : finalPlanFilePath,
+				workflowSlug: params.workflowSlug,
+				workflowPhase: params.workflowPhase,
 			},
 		};
 	}

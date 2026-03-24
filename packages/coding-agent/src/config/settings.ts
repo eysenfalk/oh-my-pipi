@@ -260,6 +260,20 @@ export class Settings {
 	}
 
 	/**
+	 * Returns true if there is a runtime override for the given path.
+	 */
+	hasOverride(path: SettingPath): boolean {
+		const segments = parsePath(path);
+		let current = this.#overrides;
+		for (let i = 0; i < segments.length - 1; i++) {
+			const segment = segments[i];
+			if (!(segment in current)) return false;
+			current = current[segment] as RawSettings;
+		}
+		return segments[segments.length - 1] in current;
+	}
+
+	/**
 	 * Flush any pending saves to disk.
 	 * Call before exit to ensure all changes are persisted.
 	 */

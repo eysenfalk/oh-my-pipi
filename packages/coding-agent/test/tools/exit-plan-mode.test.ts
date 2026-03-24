@@ -50,8 +50,6 @@ describe("ExitPlanModeTool", () => {
 		expect(result.details?.title).toBe("WP_MIGRATION_PLAN");
 		expect(result.details?.finalPlanFilePath).toBe("local://WP_MIGRATION_PLAN.md");
 		expect(result.details?.planExists).toBe(true);
-		expect(result.details?.isIntermediate).toBe(false);
-		expect(result.details?.currentStage).toBe("plan");
 	});
 
 	it("accepts explicit .md suffix in title", async () => {
@@ -66,7 +64,7 @@ describe("ExitPlanModeTool", () => {
 		const tool = new ExitPlanModeTool(createSession());
 
 		await expect(tool.execute("call-missing", { title: "WP_MIGRATION_PLAN" })).rejects.toThrow(
-			"Stage file not found at local://PLAN.md. Write the stage output to local://PLAN.md before calling exit_plan_mode.",
+			"Plan file not found at local://PLAN.md. Write the output to local://PLAN.md before calling exit_plan_mode.",
 		);
 	});
 
@@ -79,56 +77,18 @@ describe("ExitPlanModeTool", () => {
 			"Title may only contain letters, numbers, underscores, or hyphens.",
 		);
 	});
-	it("intermediate stage: succeeds without title, sets isIntermediate: true", async () => {
-		// Two-stage mode: understand -> plan, currently at 'understand' (index 0, not last)
-		const session = createSession({
-			getPlanModeState: () => ({
-				enabled: true,
-				planFilePath: "local://UNDERSTAND.md",
-				stages: ["understand", "plan"] as const,
-				currentStageIndex: 0,
-			}),
-		});
-		await Bun.write(path.join(artifactsDir, "local", "UNDERSTAND.md"), "# Understanding\n");
-
-		const tool = new ExitPlanModeTool(session);
-		const result = await tool.execute("tc-1", {});
-
-		expect(result.details?.isIntermediate).toBe(true);
-		expect(result.details?.currentStage).toBe("understand");
-		expect(result.details?.title).toBeUndefined();
-		expect(result.details?.finalPlanFilePath).toBeUndefined();
-	});
-
-	it("final stage: requires title", async () => {
-		// Two-stage mode, currently at 'plan' (index 1, which IS last)
-		const session = createSession({
-			getPlanModeState: () => ({
-				enabled: true,
-				planFilePath: "local://PLAN.md",
-				stages: ["understand", "plan"] as const,
-				currentStageIndex: 1,
-			}),
-		});
-
-		const tool = new ExitPlanModeTool(session);
-		await expect(tool.execute("tc-2", {})).rejects.toThrow("Title is required for the final plan stage");
-
+	it("title is required", async () => {
+		const tool = new ExitPlanModeTool(createSession());
+		await expect(tool.execute("tc-2", {})).rejects.toThrow("Title is required");
 		const result = await tool.execute("tc-2b", { title: "MY_PLAN" });
-		expect(result.details?.isIntermediate).toBe(false);
 		expect(result.details?.title).toBe("MY_PLAN");
 		expect(result.details?.finalPlanFilePath).toBe("local://MY_PLAN.md");
 	});
 
-	it("single-stage mode (no stages array): title required, isIntermediate: false", async () => {
-		// Legacy single-stage: no stages array, isLastStage returns true
-		const session = createSession({
-			getPlanModeState: () => ({ enabled: true, planFilePath: "local://PLAN.md" }),
-		});
-
-		const tool = new ExitPlanModeTool(session);
+	it("succeeds with title in standard plan mode", async () => {
+		const tool = new ExitPlanModeTool(createSession());
 		const result = await tool.execute("tc-3", { title: "LEGACY_PLAN" });
-		expect(result.details?.isIntermediate).toBe(false);
-		expect(result.details?.currentStage).toBe("plan");
+		expect(result.details?.title).toBe("LEGACY_PLAN");
+		expect(result.details?.planExists).toBe(true);
 	});
 });

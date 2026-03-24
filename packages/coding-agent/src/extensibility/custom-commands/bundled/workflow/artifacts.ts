@@ -8,6 +8,7 @@ export interface WorkflowState {
 	slug: string;
 	currentPhase: string;
 	artifacts: Record<string, string>;
+	activePhases?: string[];
 }
 
 const PHASES = ["brainstorm", "spec", "design", "plan", "execute", "verify", "finish"] as const;
@@ -99,4 +100,36 @@ export function formatWorkflowStatus(state: WorkflowState): string {
 		lines.push(`  ${phase}: ${artifactPath}`);
 	}
 	return lines.join("\n");
+}
+
+/** Append phase learnings to the cumulative learnings file */
+export async function persistPhaseLearnings(cwd: string, slug: string, phase: string, content: string): Promise<void> {
+	const dir = resolveWorkflowDir(cwd, slug);
+	const learningsPath = path.join(dir, "learnings.md");
+	const header = `\n\n## ${phase} learnings\n\n`;
+
+	try {
+		const existing = await Bun.file(learningsPath).text();
+		await Bun.write(learningsPath, existing + header + content);
+	} catch (err) {
+		if (isEnoent(err)) {
+			await Bun.write(learningsPath, `# Workflow Learnings\n${header}${content}`);
+		} else {
+			throw err;
+		}
+	}
+}
+
+/** Update the current phase in the workflow state without writing an artifact */
+export async function setActiveWorkflowPhase(cwd: string, slug: string, phase: string): Promise<void> {
+	const dir = resolveWorkflowDir(cwd, slug);
+	await fs.mkdir(dir, { recursive: true });
+
+	const state = (await readWorkflowState(cwd, slug)) ?? {
+		slug,
+		currentPhase: phase,
+		artifacts: {},
+	};
+	state.currentPhase = phase;
+	await Bun.write(path.join(dir, "state.json"), JSON.stringify(state, null, 2));
 }

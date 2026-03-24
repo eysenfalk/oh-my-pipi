@@ -4,8 +4,20 @@ Read `skill://brainstorming/SKILL.md` and follow it precisely.
 
 **Topic:** {{topic}}
 
-**Workflow directory:** `{{workflowDir}}`
+**Workflow slug:** `{{slug}}`
 
-Your goal is to explore the user's idea, ask clarifying questions, propose approaches, and arrive at an approved design. When the design is approved, write it to `{{workflowDir}}/brainstorm.md` and commit.
+Your goals:
+1. Explore the user's idea, ask clarifying questions, and propose approaches.
+2. Arrive at an approved design direction.
+3. Write your full brainstorm document to `local://BRAINSTORM.md`. Include:
+   - Problem statement and goals
+   - Proposed approaches with tradeoffs
+   - Recommended direction and rationale
+   - Open questions and risks
+   - **Learnings section**: what you discovered, what worked, what to improve next time
+4. When done, call `exit_plan_mode` with:
+   - `title: "BRAINSTORM"`
+   - `workflowSlug: "{{slug}}"`
+   - `workflowPhase: "brainstorm"`
 
 Do NOT write any code. Do NOT skip to implementation. The brainstorming skill's HARD GATE applies.

@@ -97,7 +97,7 @@ import {
 } from "../mcp/discoverable-tool-metadata";
 import { getCurrentThemeName, theme } from "../modes/theme/theme";
 import { normalizeDiff, normalizeToLF, ParseError, previewPatch, stripBom } from "../patch";
-import { currentStage, type PlanModeState } from "../plan-mode/state";
+import type { PlanModeState } from "../plan-mode/state";
 import autoHandoffThresholdFocusPrompt from "../prompts/system/auto-handoff-threshold-focus.md" with { type: "text" };
 import eagerTodoPrompt from "../prompts/system/eager-todo.md" with { type: "text" };
 import handoffDocumentPrompt from "../prompts/system/handoff-document.md" with { type: "text" };
@@ -2286,11 +2286,6 @@ export class AgentSession {
 			exitToolName: "exit_plan_mode",
 			reentry: state.reentry ?? false,
 			iterative: state.workflow === "iterative",
-			autoMode: state.autoMode ?? false,
-			isMultiStage: (state.stages?.length ?? 1) > 1,
-			stageName: currentStage(state),
-			stageIndex: (state.currentStageIndex ?? 0) + 1,
-			totalStages: state.stages?.length ?? 1,
 		});
 
 		return {

@@ -22,7 +22,6 @@ export type AppAction =
 	| "cycleModelForward"
 	| "cycleModelBackward"
 	| "selectModel"
-	| "togglePlanMode"
 	| "expandTools"
 	| "toggleThinking"
 	| "externalEditor"
@@ -62,7 +61,6 @@ export const DEFAULT_APP_KEYBINDINGS: Record<AppAction, KeyId | KeyId[]> = {
 	cycleModelForward: "ctrl+p",
 	cycleModelBackward: "shift+ctrl+p",
 	selectModel: "ctrl+l",
-	togglePlanMode: "alt+shift+p",
 	historySearch: "ctrl+r",
 	expandTools: "ctrl+o",
 	toggleThinking: "ctrl+t",
@@ -96,7 +94,6 @@ const APP_ACTIONS: AppAction[] = [
 	"cycleModelForward",
 	"cycleModelBackward",
 	"selectModel",
-	"togglePlanMode",
 	"historySearch",
 	"expandTools",
 	"toggleThinking",

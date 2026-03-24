@@ -7,12 +7,26 @@ Read `skill://verification/SKILL.md` and follow the Gate Function precisely.
 **Plan:** Read the plan at `{{planRef}}` for expected outcomes.
 {{/if}}
 
-Your goal is to verify that ALL claims are backed by evidence:
+**Workflow slug:** `{{slug}}`
 
-1. Run `bun test` — read full output, count pass/fail
-2. Run `bun check:ts` — verify exit code 0
-3. Run `bun lint:ts` — verify exit code 0
-4. Walk through each acceptance criterion in the spec — verify independently
-5. Check the git diff against the plan — are all tasks reflected?
+Your goals:
+1. Verify all claims with fresh evidence:
+   - Run `bun test` — read full output, count pass/fail
+   - Run `bun check:ts` — verify exit code 0
+   - Run `bun lint:ts` — verify exit code 0
+   - Walk through each acceptance criterion in the spec — verify independently
+   - Check the git diff against the plan — are all tasks reflected?
+2. Update test documentation:
+   - Test plans and coverage notes in `docs/test/`
+   - QA runbooks for complex scenarios
+3. Write verification findings to `local://VERIFY.md`. Include:
+   - Test results with exact counts
+   - Each acceptance criterion: PASS/FAIL with evidence
+   - Any gaps or deviations found
+   - **Learnings section**: what the verification revealed, testing improvements needed
+4. When done, call `exit_plan_mode` with:
+   - `title: "VERIFY"`
+   - `workflowSlug: "{{slug}}"`
+   - `workflowPhase: "verify"`
 
 Only claim completion when every verification passes with fresh evidence.

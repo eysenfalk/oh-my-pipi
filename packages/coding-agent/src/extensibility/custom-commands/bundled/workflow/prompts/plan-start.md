@@ -7,10 +7,20 @@ Read `skill://planning/SKILL.md` and follow it precisely.
 **Design:** Read the architecture document at `{{designRef}}`.
 {{/if}}
 
-**Workflow directory:** `{{workflowDir}}`
+**Workflow slug:** `{{slug}}`
 
-Your goal is to decompose the spec into ordered, bite-sized implementation tasks with TDD steps, exact file paths, agent tier selection, and parallelism annotations. Write the plan to `{{workflowDir}}/plan.md` and commit.
-
-After writing the plan, dispatch a `critic` agent to review it (max 3 iterations). Then present the plan for approval.
+Your goals:
+1. Decompose the spec into ordered, bite-sized implementation tasks.
+2. Write the plan to `local://PLAN.md`. Include:
+   - Phases with task lists
+   - TDD steps for each task
+   - Exact file paths and agent tier selection
+   - Parallelism annotations
+   - **Learnings section**: planning decisions, sequencing rationale, risk mitigation
+3. Dispatch a `critic` agent to review the plan (max 3 iterations).
+4. When done, call `exit_plan_mode` with:
+   - `title: "PLAN"`
+   - `workflowSlug: "{{slug}}"`
+   - `workflowPhase: "plan"`
 
 Do NOT implement. Write the plan only.

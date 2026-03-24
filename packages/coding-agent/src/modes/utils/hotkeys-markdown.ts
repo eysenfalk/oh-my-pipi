@@ -42,7 +42,6 @@ export function buildHotkeysMarkdown(bindings: HotkeysMarkdownBindings): string 
 		`| \`${appKey(bindings, "cycleModelBackward")}\` | Cycle role models (temporary) |`,
 		"| `Alt+P` | Select model (temporary) |",
 		`| \`${appKey(bindings, "selectModel")}\` | Select model (set roles) |`,
-		`| \`${appKey(bindings, "togglePlanMode")}\` | Toggle plan mode |`,
 		`| \`${appKey(bindings, "historySearch")}\` | Search prompt history |`,
 		`| \`${appKey(bindings, "expandTools")}\` | Toggle tool output expansion |`,
 		`| \`${appKey(bindings, "toggleThinking")}\` | Toggle thinking block visibility |`,

@@ -226,6 +226,12 @@ handlebars.registerHelper("includes", (collection: unknown, item: unknown): bool
  */
 handlebars.registerHelper("not", (value: unknown): boolean => !value);
 
+/**
+ * {{eq a b}}
+ * Equality check for use as a subexpression: {{#if (eq value "expected")}}.
+ */
+handlebars.registerHelper("eq", (a: unknown, b: unknown): boolean => a === b);
+
 handlebars.registerHelper("jtdToTypeScript", (schema: unknown): string => {
 	try {
 		return jtdToTypeScript(schema);

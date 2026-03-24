@@ -297,7 +297,7 @@ export async function runInteractiveBashPty(
 	const sink = new OutputSink({ artifactPath: options.artifactPath, artifactId: options.artifactId });
 	let pendingChunks = Promise.resolve();
 	const result = await ui.custom<BashInteractiveResult>(
-		(tui, uiTheme, _keybindings, done) => {
+		(tui, uiTheme, done) => {
 			const session = new PtySession();
 			const component = new BashInteractiveOverlayComponent(options.command, uiTheme, () => tui.terminal.rows);
 			component.setSession(session);

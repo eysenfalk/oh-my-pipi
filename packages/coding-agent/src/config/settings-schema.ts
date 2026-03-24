@@ -24,6 +24,7 @@ export type SettingTab =
 	| "editing"
 	| "tools"
 	| "tasks"
+	| "workflow"
 	| "providers";
 
 /** Tab display metadata - icon is resolved via theme.symbol() */
@@ -38,6 +39,7 @@ export const SETTING_TABS: SettingTab[] = [
 	"editing",
 	"tools",
 	"tasks",
+	"workflow",
 	"providers",
 ];
 
@@ -50,6 +52,7 @@ export const TAB_METADATA: Record<SettingTab, { label: string; icon: `tab.${stri
 	editing: { label: "Editing", icon: "tab.editing" },
 	tools: { label: "Tools", icon: "tab.tools" },
 	tasks: { label: "Tasks", icon: "tab.tasks" },
+	workflow: { label: "Workflow", icon: "tab.workflow" },
 	providers: { label: "Providers", icon: "tab.providers" },
 };
 
@@ -1576,39 +1579,334 @@ export const SETTINGS_SCHEMA = {
 
 	"commit.changelogMaxDiffChars": { type: "number", default: 120000 },
 
-	"planning.stages.understand": {
+	"workflow.phases.brainstorm.enabled": {
 		type: "boolean",
-		default: false,
+		default: true,
 		ui: {
-			tab: "tasks",
-			label: "Understanding Stage",
-			description: "Explore codebase and document findings before designing",
+			tab: "workflow",
+			label: "Brainstorm Phase",
+			description: "Enable the brainstorm phase",
 			submenu: true,
 		},
 	},
 
-	"planning.stages.design": {
-		type: "boolean",
-		default: false,
+	"workflow.phases.brainstorm.approval": {
+		type: "enum",
+		default: "user",
+		values: ["none", "user", "agent", "both"],
 		ui: {
-			tab: "tasks",
-			label: "Design Stage",
-			description: "Propose architecture and make design decisions before planning",
+			tab: "workflow",
+			label: "Brainstorm Approval",
+			description: "Who must approve before advancing from brainstorm",
 			submenu: true,
 		},
 	},
 
-	"planning.stages.review": {
-		type: "boolean",
-		default: false,
+	"workflow.phases.brainstorm.reviewAgent": {
+		type: "enum",
+		default: "critic",
+		values: ["critic", "reviewer"],
 		ui: {
-			tab: "tasks",
-			label: "Review Stage",
-			description: "Validate design against requirements before final plan",
+			tab: "workflow",
+			label: "Brainstorm Review Agent",
+			description: "Agent used for automated review of brainstorm output",
 			submenu: true,
 		},
 	},
 
+	"workflow.phases.brainstorm.maxReviewRounds": {
+		type: "enum",
+		default: "3",
+		values: ["1", "2", "3", "4", "5"],
+		ui: {
+			tab: "workflow",
+			label: "Brainstorm Max Review Rounds",
+			description: "Maximum agent review iterations before escalating to user",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.spec.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "workflow",
+			label: "Spec Phase",
+			description: "Enable the spec phase",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.spec.approval": {
+		type: "enum",
+		default: "user",
+		values: ["none", "user", "agent", "both"],
+		ui: {
+			tab: "workflow",
+			label: "Spec Approval",
+			description: "Who must approve before advancing from spec",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.spec.reviewAgent": {
+		type: "enum",
+		default: "critic",
+		values: ["critic", "reviewer"],
+		ui: {
+			tab: "workflow",
+			label: "Spec Review Agent",
+			description: "Agent used for automated review of spec output",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.spec.maxReviewRounds": {
+		type: "enum",
+		default: "3",
+		values: ["1", "2", "3", "4", "5"],
+		ui: {
+			tab: "workflow",
+			label: "Spec Max Review Rounds",
+			description: "Maximum agent review iterations before escalating to user",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.design.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "workflow",
+			label: "Design Phase",
+			description: "Enable the design phase",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.design.approval": {
+		type: "enum",
+		default: "user",
+		values: ["none", "user", "agent", "both"],
+		ui: {
+			tab: "workflow",
+			label: "Design Approval",
+			description: "Who must approve before advancing from design",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.design.reviewAgent": {
+		type: "enum",
+		default: "critic",
+		values: ["critic", "reviewer"],
+		ui: {
+			tab: "workflow",
+			label: "Design Review Agent",
+			description: "Agent used for automated review of design output",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.design.maxReviewRounds": {
+		type: "enum",
+		default: "3",
+		values: ["1", "2", "3", "4", "5"],
+		ui: {
+			tab: "workflow",
+			label: "Design Max Review Rounds",
+			description: "Maximum agent review iterations before escalating to user",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.plan.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "workflow",
+			label: "Plan Phase",
+			description: "Enable the plan phase",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.plan.approval": {
+		type: "enum",
+		default: "user",
+		values: ["none", "user", "agent", "both"],
+		ui: {
+			tab: "workflow",
+			label: "Plan Approval",
+			description: "Who must approve before advancing from plan",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.plan.reviewAgent": {
+		type: "enum",
+		default: "critic",
+		values: ["critic", "reviewer"],
+		ui: {
+			tab: "workflow",
+			label: "Plan Review Agent",
+			description: "Agent used for automated review of plan output",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.plan.maxReviewRounds": {
+		type: "enum",
+		default: "3",
+		values: ["1", "2", "3", "4", "5"],
+		ui: {
+			tab: "workflow",
+			label: "Plan Max Review Rounds",
+			description: "Maximum agent review iterations before escalating to user",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.execute.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "workflow",
+			label: "Execute Phase",
+			description: "Enable the execute phase",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.execute.approval": {
+		type: "enum",
+		default: "user",
+		values: ["none", "user", "agent", "both"],
+		ui: {
+			tab: "workflow",
+			label: "Execute Approval",
+			description: "Who must approve before advancing from execute",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.execute.reviewAgent": {
+		type: "enum",
+		default: "critic",
+		values: ["critic", "reviewer"],
+		ui: {
+			tab: "workflow",
+			label: "Execute Review Agent",
+			description: "Agent used for automated review of execute output",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.execute.maxReviewRounds": {
+		type: "enum",
+		default: "3",
+		values: ["1", "2", "3", "4", "5"],
+		ui: {
+			tab: "workflow",
+			label: "Execute Max Review Rounds",
+			description: "Maximum agent review iterations before escalating to user",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.verify.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "workflow",
+			label: "Verify Phase",
+			description: "Enable the verify phase",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.verify.approval": {
+		type: "enum",
+		default: "user",
+		values: ["none", "user", "agent", "both"],
+		ui: {
+			tab: "workflow",
+			label: "Verify Approval",
+			description: "Who must approve before advancing from verify",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.verify.reviewAgent": {
+		type: "enum",
+		default: "critic",
+		values: ["critic", "reviewer"],
+		ui: {
+			tab: "workflow",
+			label: "Verify Review Agent",
+			description: "Agent used for automated review of verify output",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.verify.maxReviewRounds": {
+		type: "enum",
+		default: "3",
+		values: ["1", "2", "3", "4", "5"],
+		ui: {
+			tab: "workflow",
+			label: "Verify Max Review Rounds",
+			description: "Maximum agent review iterations before escalating to user",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.finish.enabled": {
+		type: "boolean",
+		default: true,
+		ui: {
+			tab: "workflow",
+			label: "Finish Phase",
+			description: "Enable the finish phase",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.finish.approval": {
+		type: "enum",
+		default: "user",
+		values: ["none", "user", "agent", "both"],
+		ui: {
+			tab: "workflow",
+			label: "Finish Approval",
+			description: "Who must approve before advancing from finish",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.finish.reviewAgent": {
+		type: "enum",
+		default: "critic",
+		values: ["critic", "reviewer"],
+		ui: {
+			tab: "workflow",
+			label: "Finish Review Agent",
+			description: "Agent used for automated review of finish output",
+			submenu: true,
+		},
+	},
+
+	"workflow.phases.finish.maxReviewRounds": {
+		type: "enum",
+		default: "3",
+		values: ["1", "2", "3", "4", "5"],
+		ui: {
+			tab: "workflow",
+			label: "Finish Max Review Rounds",
+			description: "Maximum agent review iterations before escalating to user",
+			submenu: true,
+		},
+	},
 	"thinkingBudgets.minimal": { type: "number", default: 1024 },
 
 	"thinkingBudgets.low": { type: "number", default: 2048 },

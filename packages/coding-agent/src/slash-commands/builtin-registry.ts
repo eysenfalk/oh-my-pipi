@@ -81,26 +81,6 @@ const BUILTIN_SLASH_COMMAND_REGISTRY: ReadonlyArray<BuiltinSlashCommandSpec> = [
 		},
 	},
 	{
-		name: "plan",
-		description: "Toggle plan mode (agent plans before executing)",
-		inlineHint: "[prompt]",
-		allowArgs: true,
-		handle: async (command, runtime) => {
-			await runtime.ctx.handlePlanModeCommand(command.args || undefined);
-			runtime.ctx.editor.setText("");
-		},
-	},
-	{
-		name: "auto",
-		description: "Toggle auto mode (agent plans then executes autonomously)",
-		inlineHint: "[prompt]",
-		allowArgs: true,
-		handle: async (command, runtime) => {
-			await runtime.ctx.handleAutoModeCommand(command.args || undefined);
-			runtime.ctx.editor.setText("");
-		},
-	},
-	{
 		name: "read-only",
 		description: "Toggle read-only mode (blocks all file writes and bash commands)",
 		handle: async (_command, runtime) => {

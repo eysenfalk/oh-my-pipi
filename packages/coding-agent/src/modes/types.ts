@@ -217,8 +217,6 @@ export interface InteractiveModeContext {
 	toggleThinkingBlockVisibility(): void;
 	openExternalEditor(): void;
 	registerExtensionShortcuts(): void;
-	handlePlanModeCommand(initialPrompt?: string): Promise<void>;
-	handleAutoModeCommand(initialPrompt?: string): Promise<void>;
 	handleExitPlanModeTool(details: ExitPlanModeDetails): Promise<void>;
 	handleReadOnlyCommand(): Promise<void>;
 	handleWorkflowConfigCommand(): Promise<void>;
@@ -246,7 +244,6 @@ export interface InteractiveModeContext {
 		factory: (
 			tui: TUI,
 			theme: Theme,
-			keybindings: KeybindingsManager,
 			done: (result: T) => void,
 		) => (Component & { dispose?(): void }) | Promise<Component & { dispose?(): void }>,
 		options?: { overlay?: boolean },

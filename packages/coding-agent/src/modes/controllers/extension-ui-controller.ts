@@ -1,7 +1,6 @@
 import type { Component, OverlayHandle, TUI } from "@oh-my-pi/pi-tui";
 import { Spacer, Text } from "@oh-my-pi/pi-tui";
 import { logger } from "@oh-my-pi/pi-utils";
-import { KeybindingsManager } from "../../config/keybindings";
 import type {
 	ExtensionActions,
 	ExtensionCommandContextActions,
@@ -764,13 +763,11 @@ export class ExtensionUiController {
 		factory: (
 			tui: TUI,
 			theme: Theme,
-			keybindings: KeybindingsManager,
 			done: (result: T) => void,
 		) => (Component & { dispose?(): void }) | Promise<Component & { dispose?(): void }>,
 		options?: { overlay?: boolean },
 	): Promise<T> {
 		const savedText = this.ctx.editor.getText();
-		const keybindings = KeybindingsManager.inMemory();
 
 		const { promise, resolve } = Promise.withResolvers<T>();
 		let component: (Component & { dispose?(): void }) | undefined;
@@ -793,7 +790,7 @@ export class ExtensionUiController {
 			resolve(result);
 		};
 
-		Promise.try(() => factory(this.ctx.ui, theme, keybindings, close)).then(c => {
+		Promise.try(() => factory(this.ctx.ui, theme, close)).then(c => {
 			if (closed) {
 				c.dispose?.();
 				return;
