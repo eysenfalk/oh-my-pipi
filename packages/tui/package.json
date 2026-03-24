@@ -61,6 +61,10 @@
 		"./components/*": {
 			"types": "./src/components/*.ts",
 			"import": "./src/components/*.ts"
+		},
+		"./test/*": {
+			"types": "./test/*.ts",
+			"import": "./test/*.ts"
 		}
 	}
 }

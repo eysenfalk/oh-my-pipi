@@ -9,7 +9,13 @@ import { isRecord, ptree, readJsonl } from "@oh-my-pi/pi-utils";
 import type { BashResult } from "../../exec/bash-executor";
 import type { SessionStats } from "../../session/agent-session";
 import type { CompactionResult } from "../../session/compaction";
-import type { RpcCommand, RpcResponse, RpcSessionState } from "./rpc-types";
+import type {
+	RpcCommand,
+	RpcExtensionUIRequest,
+	RpcExtensionUIResponse,
+	RpcResponse,
+	RpcSessionState,
+} from "./rpc-types";
 
 /** Distributive Omit that works with union types */
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
@@ -37,6 +43,8 @@ export interface RpcClientOptions {
 export type ModelInfo = Pick<Model, "provider" | "id" | "contextWindow" | "reasoning" | "thinking">;
 
 export type RpcEventListener = (event: AgentEvent) => void;
+
+export type RpcExtensionUIListener = (request: RpcExtensionUIRequest) => void;
 
 const agentEventTypes = new Set<AgentEvent["type"]>([
 	"agent_start",
@@ -77,6 +85,7 @@ function isAgentEvent(value: unknown): value is AgentEvent {
 export class RpcClient {
 	#process: ptree.ChildProcess | null = null;
 	#eventListeners: RpcEventListener[] = [];
+	#extensionUIListeners: RpcExtensionUIListener[] = [];
 	#pendingRequests: Map<string, { resolve: (response: RpcResponse) => void; reject: (error: Error) => void }> =
 		new Map();
 	#requestId = 0;
@@ -199,6 +208,19 @@ export class RpcClient {
 			const index = this.#eventListeners.indexOf(listener);
 			if (index !== -1) {
 				this.#eventListeners.splice(index, 1);
+			}
+		};
+	}
+
+	/**
+	 * Subscribe to extension UI requests (select/confirm/input dialogs from the agent).
+	 */
+	onExtensionUIRequest(listener: RpcExtensionUIListener): () => void {
+		this.#extensionUIListeners.push(listener);
+		return () => {
+			const index = this.#extensionUIListeners.indexOf(listener);
+			if (index !== -1) {
+				this.#extensionUIListeners.splice(index, 1);
 			}
 		};
 	}
@@ -498,6 +520,21 @@ export class RpcClient {
 		return eventsPromise;
 	}
 
+	/**
+	 * Send an extension UI response (fire-and-forget, no RPC response expected).
+	 * Used to respond to select/confirm/input dialogs from the agent (e.g., workflow approval gates).
+	 */
+	sendExtensionUIResponse(response: DistributiveOmit<RpcExtensionUIResponse, "type">): void {
+		if (!this.#process?.stdin) throw new Error("Client not started");
+		const stdin = this.#process.stdin as import("bun").FileSink;
+		const payload = { type: "extension_ui_response" as const, ...response };
+		stdin.write(`${JSON.stringify(payload)}\n`);
+		const flushResult = stdin.flush();
+		if (flushResult instanceof Promise) {
+			flushResult.catch(() => {});
+		}
+	}
+
 	// =========================================================================
 	// Internal
 	// =========================================================================
@@ -512,6 +549,14 @@ export class RpcClient {
 				pending.resolve(data);
 				return;
 			}
+		}
+
+		// Forward extension UI requests to dedicated listeners
+		if (isRecord(data) && data.type === "extension_ui_request") {
+			for (const listener of this.#extensionUIListeners) {
+				listener(data as RpcExtensionUIRequest);
+			}
+			return;
 		}
 
 		if (!isAgentEvent(data)) return;

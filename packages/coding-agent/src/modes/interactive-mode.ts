@@ -5,7 +5,7 @@
 import * as path from "node:path";
 import { type Agent, type AgentMessage, ThinkingLevel } from "@oh-my-pi/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, Model, UsageReport } from "@oh-my-pi/pi-ai";
-import type { Component, SlashCommand } from "@oh-my-pi/pi-tui";
+import type { Component, SlashCommand, Terminal } from "@oh-my-pi/pi-tui";
 import { Container, Loader, Markdown, ProcessTerminal, Spacer, Text, TUI } from "@oh-my-pi/pi-tui";
 import { APP_NAME, getProjectDir, hsvToRgb, isEnoent, logger, postmortem } from "@oh-my-pi/pi-utils";
 import chalk from "chalk";
@@ -201,6 +201,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			| Array<{ name: string; status: "ready" | "error"; fileTypes: string[]; error?: string }>
 			| undefined = undefined,
 		mcpManager?: import("../mcp").MCPManager,
+		terminal?: Terminal,
 	) {
 		this.session = session;
 		this.sessionManager = session.sessionManager;
@@ -213,7 +214,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		this.lspServers = lspServers;
 		this.mcpManager = mcpManager;
 
-		this.ui = new TUI(new ProcessTerminal(), settings.get("showHardwareCursor"));
+		this.ui = new TUI(terminal ?? new ProcessTerminal(), settings.get("showHardwareCursor"));
 		this.ui.setClearOnShrink(settings.get("clearOnShrink"));
 		setMermaidRenderCallback(() => this.ui.requestRender());
 		this.chatContainer = new Container();

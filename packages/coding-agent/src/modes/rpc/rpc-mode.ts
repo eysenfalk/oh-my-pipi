@@ -21,6 +21,7 @@ import type {
 	RpcResponse,
 	RpcSessionState,
 } from "./rpc-types";
+import { RpcWorkflowHandler } from "./rpc-workflow-handler";
 
 // Re-export types for consumers
 export type * from "./rpc-types";
@@ -315,6 +316,10 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 
 	// Set up extensions with RPC-based UI context
 	const extensionRunner = session.extensionRunner;
+	const uiContext = new RpcExtensionUIContext(pendingExtensionRequests, output);
+	const workflowHandler = new RpcWorkflowHandler(session, uiContext);
+	workflowHandler.subscribeToEvents();
+
 	if (extensionRunner) {
 		extensionRunner.initialize(
 			// ExtensionActions
@@ -374,7 +379,6 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 				waitForIdle: () => session.agent.waitForIdle(),
 				newSession: async options => {
 					const success = await session.newSession({ parentSession: options?.parentSession });
-					// Note: setup callback runs but no UI feedback in RPC mode
 					if (success && options?.setup) {
 						await options.setup(session.sessionManager);
 					}
@@ -403,8 +407,12 @@ export async function runRpcMode(session: AgentSession): Promise<never> {
 							: undefined;
 					await session.compact(instructions, options);
 				},
+				startWorkflow: details => workflowHandler.startWorkflow(details),
+				activateWorkflowPhase: (slug, phase, phases) =>
+					workflowHandler.activateWorkflowPhase(slug, phase, phases ?? undefined),
+				switchWorkflow: details => workflowHandler.switchWorkflow(details),
 			},
-			new RpcExtensionUIContext(pendingExtensionRequests, output),
+			uiContext,
 		);
 		extensionRunner.onError(err => {
 			output({ type: "extension_error", extensionPath: err.extensionPath, event: err.event, error: err.error });
