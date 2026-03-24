@@ -37,15 +37,15 @@ export class WorkflowCommand implements CustomCommand {
 		const [subcommand, ...rest] = args;
 
 		if (!subcommand) {
-			const status = await this.#showStatus(ctx);
-			if (status) return status;
-			return this.#showHelp();
+			const hasActive = await this.#showStatus(ctx);
+			if (!hasActive) this.#showHelp(ctx);
+			return undefined;
 		}
 
 		switch (subcommand) {
 			case "config": {
 				if (!ctx.hasUI) {
-					return "Use in interactive mode to configure workflow phases.";
+					return this.#infoError(ctx, "Use in interactive mode to configure workflow phases.");
 				}
 				await ctx.ui.custom((_tui, _theme, done) => createWorkflowConfigComponent(done));
 				return undefined;
@@ -82,23 +82,40 @@ export class WorkflowCommand implements CustomCommand {
 				return this.#skipPhase(rest, ctx);
 			case "abandon":
 				return this.#abandonWorkflow(rest, ctx);
+			case "help":
+				return this.#showHelp(ctx);
 			default:
-				return this.#showHelp();
+				return this.#showHelp(ctx);
 		}
 	}
 
-	async #showStatus(ctx: HookCommandContext): Promise<string | undefined> {
+	#info(ctx: HookCommandContext, message: string): undefined {
+		if (ctx.hasUI) {
+			ctx.ui.notify(message, "info");
+		}
+		return undefined;
+	}
+
+	#infoError(ctx: HookCommandContext, message: string): undefined {
+		if (ctx.hasUI) {
+			ctx.ui.notify(message, "error");
+		}
+		return undefined;
+	}
+
+	async #showStatus(ctx: HookCommandContext): Promise<boolean> {
 		const activeSlug = await findActiveWorkflow(ctx.cwd);
-		if (!activeSlug) return undefined;
+		if (!activeSlug) return false;
 		const state = await readWorkflowState(ctx.cwd, activeSlug);
-		if (!state) return undefined;
-		return formatWorkflowStatus(state);
+		if (!state) return false;
+		this.#info(ctx, formatWorkflowStatus(state));
+		return true;
 	}
 
 	async #startBrainstorm(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
 		const topic = rest.join(" ");
 		if (!topic) {
-			if (!ctx.hasUI) return "Usage: /workflow brainstorm <topic>";
+			if (!ctx.hasUI) return this.#infoError(ctx, "Usage: /workflow brainstorm <topic>");
 			const input = await ctx.ui.input("Brainstorm topic", "What do you want to build?");
 			if (!input) return undefined;
 			return this.#startBrainstorm([input], ctx);
@@ -119,10 +136,9 @@ export class WorkflowCommand implements CustomCommand {
 
 	async #startSpec(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
 		const slug = await this.#resolveSlug(rest, ctx);
-		if (!slug) return "No workflow slug specified and no active workflow found.";
+		if (!slug) return this.#infoError(ctx, "No workflow slug specified and no active workflow found.");
 
-		const prereqError = await this.#checkPrereq(ctx.cwd, slug, "brainstorm");
-		if (prereqError) return prereqError;
+		if (await this.#checkPrereq(ctx, slug, "brainstorm")) return undefined;
 
 		const workflowDir = path.join(WORKFLOW_DIR, slug);
 		const brainstormRef = await this.#artifactRef(ctx.cwd, slug, "brainstorm");
@@ -134,10 +150,9 @@ export class WorkflowCommand implements CustomCommand {
 
 	async #startDesign(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
 		const slug = await this.#resolveSlug(rest, ctx);
-		if (!slug) return "No workflow slug specified and no active workflow found.";
+		if (!slug) return this.#infoError(ctx, "No workflow slug specified and no active workflow found.");
 
-		const prereqError = await this.#checkPrereq(ctx.cwd, slug, "spec");
-		if (prereqError) return prereqError;
+		if (await this.#checkPrereq(ctx, slug, "spec")) return undefined;
 
 		const workflowDir = path.join(WORKFLOW_DIR, slug);
 		const specRef = await this.#artifactRef(ctx.cwd, slug, "spec");
@@ -151,10 +166,9 @@ export class WorkflowCommand implements CustomCommand {
 
 	async #startPlan(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
 		const slug = await this.#resolveSlug(rest, ctx);
-		if (!slug) return "No workflow slug specified and no active workflow found.";
+		if (!slug) return this.#infoError(ctx, "No workflow slug specified and no active workflow found.");
 
-		const prereqError = await this.#checkPrereq(ctx.cwd, slug, "design");
-		if (prereqError) return prereqError;
+		if (await this.#checkPrereq(ctx, slug, "design")) return undefined;
 
 		const workflowDir = path.join(WORKFLOW_DIR, slug);
 		const specRef = await this.#artifactRef(ctx.cwd, slug, "spec");
@@ -168,10 +182,9 @@ export class WorkflowCommand implements CustomCommand {
 
 	async #startExecute(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
 		const slug = await this.#resolveSlug(rest, ctx);
-		if (!slug) return "No workflow slug specified and no active workflow found.";
+		if (!slug) return this.#infoError(ctx, "No workflow slug specified and no active workflow found.");
 
-		const prereqError = await this.#checkPrereq(ctx.cwd, slug, "plan");
-		if (prereqError) return prereqError;
+		if (await this.#checkPrereq(ctx, slug, "plan")) return undefined;
 
 		const planRef = await this.#artifactRef(ctx.cwd, slug, "plan");
 		const specRef = await this.#artifactRef(ctx.cwd, slug, "spec");
@@ -184,15 +197,14 @@ export class WorkflowCommand implements CustomCommand {
 
 	async #startVerify(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
 		const slug = await this.#resolveSlug(rest, ctx);
-		if (!slug) return "No workflow slug specified and no active workflow found.";
+		if (!slug) return this.#infoError(ctx, "No workflow slug specified and no active workflow found.");
 
 		const specRef = await this.#artifactRef(ctx.cwd, slug, "spec");
 		const planRef = await this.#artifactRef(ctx.cwd, slug, "plan");
 
-		if (!specRef) return `No spec artifact found for workflow "${slug}".`;
+		if (!specRef) return this.#infoError(ctx, `No spec artifact found for workflow "${slug}".`);
 
-		const prereqError = await this.#checkPrereq(ctx.cwd, slug, "execute");
-		if (prereqError) return prereqError;
+		if (await this.#checkPrereq(ctx, slug, "execute")) return undefined;
 
 		const setup = await this.#populateLocalSetup(ctx.cwd, slug, ["brainstorm", "spec", "design", "plan", "execute"]);
 		ctx.activateWorkflowPhase(slug, "verify");
@@ -202,10 +214,9 @@ export class WorkflowCommand implements CustomCommand {
 
 	async #startFinish(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
 		const slug = await this.#resolveSlug(rest, ctx);
-		if (!slug) return "No workflow slug specified and no active workflow found.";
+		if (!slug) return this.#infoError(ctx, "No workflow slug specified and no active workflow found.");
 
-		const prereqError = await this.#checkPrereq(ctx.cwd, slug, "verify");
-		if (prereqError) return prereqError;
+		if (await this.#checkPrereq(ctx, slug, "verify")) return undefined;
 
 		const setup = await this.#populateLocalSetup(ctx.cwd, slug, [
 			"brainstorm",
@@ -222,14 +233,14 @@ export class WorkflowCommand implements CustomCommand {
 
 	async #resume(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
 		const slug = rest[0] ?? (await findActiveWorkflow(ctx.cwd));
-		if (!slug) return "No workflow slug specified and no active workflow found.";
+		if (!slug) return this.#infoError(ctx, "No workflow slug specified and no active workflow found.");
 
 		const state = await readWorkflowState(ctx.cwd, slug);
-		if (!state) return `No state found for workflow "${slug}".`;
+		if (!state) return this.#infoError(ctx, `No state found for workflow "${slug}".`);
 
 		const nextPhase = getNextPhase(state);
 		if (!nextPhase) {
-			return `Workflow "${slug}" has completed all phases.\n\n${formatWorkflowStatus(state)}`;
+			return this.#info(ctx, `Workflow "${slug}" has completed all phases.\n\n${formatWorkflowStatus(state)}`);
 		}
 		return this.#dispatchToPhase(nextPhase, slug, ctx);
 	}
@@ -257,15 +268,15 @@ export class WorkflowCommand implements CustomCommand {
 			case "finish":
 				return this.#startFinish([slug], ctx);
 			default:
-				return `Unknown phase "${phase}". Resume manually with /workflow <phase> ${slug}.`;
+				return this.#infoError(ctx, `Unknown phase "${phase}". Resume manually with /workflow <phase> ${slug}.`);
 		}
 	}
 
 	async #goBack(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
 		const slug = await this.#resolveSlug(rest.slice(1), ctx);
-		if (!slug) return "No workflow slug specified and no active workflow found.";
+		if (!slug) return this.#infoError(ctx, "No workflow slug specified and no active workflow found.");
 		const state = await readWorkflowState(ctx.cwd, slug);
-		if (!state) return `No state found for workflow "${slug}".`;
+		if (!state) return this.#infoError(ctx, `No state found for workflow "${slug}".`);
 
 		// If phase specified directly
 		if (rest[0] && PHASES.includes(rest[0] as WorkflowPhase)) {
@@ -276,11 +287,11 @@ export class WorkflowCommand implements CustomCommand {
 		// Show completed phases (those with artifacts)
 		const completedPhases = PHASES.filter(p => !!state.artifacts[p]);
 		if (completedPhases.length === 0) {
-			return `No completed phases found for workflow "${slug}".`;
+			return this.#infoError(ctx, `No completed phases found for workflow "${slug}".`);
 		}
 
 		if (!ctx.hasUI) {
-			return `Usage: /workflow back <phase> [slug]\nCompleted: ${completedPhases.join(", ")}`;
+			return this.#infoError(ctx, `Usage: /workflow back <phase> [slug]\nCompleted: ${completedPhases.join(", ")}`);
 		}
 
 		const selected = await ctx.ui.select("Re-enter phase", completedPhases as string[]);
@@ -295,12 +306,12 @@ export class WorkflowCommand implements CustomCommand {
 				ctx.ui.notify("No workflows found.", "info");
 				return undefined;
 			}
-			return "No workflows found.";
+			return this.#infoError(ctx, "No workflows found.");
 		}
 
 		const selected = rest[0] ?? (ctx.hasUI ? await ctx.ui.select("Switch to workflow", slugs) : null);
 		if (!selected) {
-			if (!ctx.hasUI) return "Usage: /workflow switch <slug>";
+			if (!ctx.hasUI) return this.#infoError(ctx, "Usage: /workflow switch <slug>");
 			return undefined;
 		}
 
@@ -314,7 +325,7 @@ export class WorkflowCommand implements CustomCommand {
 				ctx.ui.notify("No workflows found.", "info");
 				return undefined;
 			}
-			return "No workflows found.";
+			return this.#infoError(ctx, "No workflows found.");
 		}
 
 		if (!ctx.hasUI) {
@@ -323,7 +334,7 @@ export class WorkflowCommand implements CustomCommand {
 				const state = await readWorkflowState(ctx.cwd, slug);
 				lines.push(`  ${slug}${state ? ` [${state.currentPhase}]` : ""}`);
 			}
-			return lines.join("\n");
+			return this.#info(ctx, lines.join("\n"));
 		}
 
 		const items: string[] = [];
@@ -339,7 +350,7 @@ export class WorkflowCommand implements CustomCommand {
 		return this.#resume([slug], ctx);
 	}
 
-	#showHelp(): string {
+	#showHelp(ctx: HookCommandContext): undefined {
 		const cmds = [
 			"brainstorm <topic>  Start new workflow",
 			"spec [slug]         Write specification",
@@ -358,15 +369,16 @@ export class WorkflowCommand implements CustomCommand {
 			"rename <old> <new>  Rename a workflow",
 			"abandon [slug]      Mark workflow as abandoned",
 			"config              Open phase configuration",
+			"help                Show this help",
 		];
-		return cmds.map(l => `  /workflow ${l}`).join("\n");
+		return this.#info(ctx, cmds.map(l => `  /workflow ${l}`).join("\n"));
 	}
 
 	async #showDetailedStatus(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
 		const slug = await this.#resolveSlug(rest, ctx);
-		if (!slug) return "No active workflow found.";
+		if (!slug) return this.#infoError(ctx, "No active workflow found.");
 		const state = await readWorkflowState(ctx.cwd, slug);
-		if (!state) return `No state found for workflow "${slug}".`;
+		if (!state) return this.#infoError(ctx, `No state found for workflow "${slug}".`);
 		const order: WorkflowPhase[] = ["brainstorm", "spec", "design", "plan", "execute", "verify", "finish"];
 		const lines = [`Workflow: ${slug}`, `Status: ${state.status ?? "active"}`, ""];
 		for (const phase of order) {
@@ -376,12 +388,12 @@ export class WorkflowCommand implements CustomCommand {
 			const marker = !isActive ? "-" : hasArtifact ? "v" : isCurrent ? ">" : "o";
 			lines.push(`  ${marker} ${phase}`);
 		}
-		return lines.join("\n");
+		return this.#info(ctx, lines.join("\n"));
 	}
 
 	async #deleteWorkflow(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
 		const slug = await this.#resolveSlug(rest, ctx);
-		if (!slug) return "No workflow slug specified.";
+		if (!slug) return this.#infoError(ctx, "No workflow slug specified.");
 
 		if (ctx.hasUI) {
 			const confirm = await ctx.ui.select(`Delete workflow "${slug}"?`, ["Yes, delete", "Cancel"]);
@@ -396,18 +408,18 @@ export class WorkflowCommand implements CustomCommand {
 			await setActiveWorkflowSlug(ctx.cwd, null);
 		}
 
-		return `Workflow "${slug}" deleted.`;
+		return this.#info(ctx, `Workflow "${slug}" deleted.`);
 	}
 
 	async #renameWorkflow(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
-		if (rest.length < 2) return "Usage: /workflow rename <old-slug> <new-slug>";
+		if (rest.length < 2) return this.#infoError(ctx, "Usage: /workflow rename <old-slug> <new-slug>");
 		const [oldSlug, newSlug] = rest;
 
 		const oldDir = resolveWorkflowDir(ctx.cwd, oldSlug);
 		const newDir = resolveWorkflowDir(ctx.cwd, newSlug);
 
 		const state = await readWorkflowState(ctx.cwd, oldSlug);
-		if (!state) return `No workflow "${oldSlug}" found.`;
+		if (!state) return this.#infoError(ctx, `No workflow "${oldSlug}" found.`);
 
 		await fs.cp(oldDir, newDir, { recursive: true });
 
@@ -421,29 +433,30 @@ export class WorkflowCommand implements CustomCommand {
 			await setActiveWorkflowSlug(ctx.cwd, newSlug);
 		}
 
-		return `Workflow renamed: ${oldSlug} -> ${newSlug}`;
+		return this.#info(ctx, `Workflow renamed: ${oldSlug} -> ${newSlug}`);
 	}
 
 	async #skipPhase(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
-		if (rest.length === 0) return "Usage: /workflow skip <phase> [slug]";
+		if (rest.length === 0) return this.#infoError(ctx, "Usage: /workflow skip <phase> [slug]");
 		const phase = rest[0] as WorkflowPhase;
 		const VALID_PHASES: WorkflowPhase[] = ["brainstorm", "spec", "design", "plan", "execute", "verify", "finish"];
-		if (!VALID_PHASES.includes(phase)) return `Unknown phase "${rest[0]}". Valid: ${VALID_PHASES.join(", ")}`;
+		if (!VALID_PHASES.includes(phase))
+			return this.#infoError(ctx, `Unknown phase "${rest[0]}". Valid: ${VALID_PHASES.join(", ")}`);
 
 		const slugRest = rest.slice(1);
 		const slug = await this.#resolveSlug(slugRest, ctx);
-		if (!slug) return "No workflow slug specified and no active workflow found.";
+		if (!slug) return this.#infoError(ctx, "No workflow slug specified and no active workflow found.");
 
 		await writeWorkflowArtifact(ctx.cwd, slug, phase, "(skipped)");
-		return `Phase "${phase}" marked as skipped for workflow "${slug}".`;
+		return this.#info(ctx, `Phase "${phase}" marked as skipped for workflow "${slug}".`);
 	}
 
 	async #abandonWorkflow(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
 		const slug = await this.#resolveSlug(rest, ctx);
-		if (!slug) return "No workflow slug specified and no active workflow found.";
+		if (!slug) return this.#infoError(ctx, "No workflow slug specified and no active workflow found.");
 
 		const state = await readWorkflowState(ctx.cwd, slug);
-		if (!state) return `No state found for workflow "${slug}".`;
+		if (!state) return this.#infoError(ctx, `No state found for workflow "${slug}".`);
 
 		state.status = "abandoned";
 		const dir = resolveWorkflowDir(ctx.cwd, slug);
@@ -454,7 +467,7 @@ export class WorkflowCommand implements CustomCommand {
 			await setActiveWorkflowSlug(ctx.cwd, null);
 		}
 
-		return `Workflow "${slug}" marked as abandoned.`;
+		return this.#info(ctx, `Workflow "${slug}" marked as abandoned.`);
 	}
 
 	async #artifactRef(cwd: string, slug: string, phase: string): Promise<string | null> {
@@ -463,23 +476,28 @@ export class WorkflowCommand implements CustomCommand {
 		return path.join(WORKFLOW_DIR, slug, `${phase}.md`);
 	}
 
-	/** Check if a prerequisite phase has a persisted artifact, respecting whether the phase is enabled. */
-	async #checkPrereq(cwd: string, slug: string, prereq: WorkflowPhase): Promise<string | null> {
+	/** Check if a prerequisite phase has a persisted artifact, respecting whether the phase is enabled. Returns true if blocked. */
+	async #checkPrereq(ctx: HookCommandContext, slug: string, prereq: WorkflowPhase): Promise<boolean> {
 		// Read slug-level config first
-		const state = await readWorkflowState(cwd, slug);
+		const state = await readWorkflowState(ctx.cwd, slug);
 		if (state?.activePhases) {
 			// Phase not in this slug's active phases — skip it
-			if (!state.activePhases.includes(prereq)) return null;
+			if (!state.activePhases.includes(prereq)) return false;
 			// Phase is in active phases — must have artifact
 		} else {
 			// No slug-level config: fall back to global settings
 			const enabled = settings.get(`workflow.phases.${prereq}.enabled` as SettingPath);
-			if (enabled === false) return null;
+			if (enabled === false) return false;
 		}
-		const content = await readWorkflowArtifact(cwd, slug, prereq);
-		if (!content)
-			return `Phase "${prereq}" has not been completed for workflow "${slug}". Run /workflow ${prereq} first.`;
-		return null;
+		const content = await readWorkflowArtifact(ctx.cwd, slug, prereq);
+		if (!content) {
+			this.#infoError(
+				ctx,
+				`Phase "${prereq}" has not been completed for workflow "${slug}". Run /workflow ${prereq} first.`,
+			);
+			return true;
+		}
+		return false;
 	}
 
 	/**
