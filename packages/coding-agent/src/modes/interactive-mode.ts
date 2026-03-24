@@ -13,7 +13,15 @@ import { KeybindingsManager } from "../config/keybindings";
 import { renderPromptTemplate } from "../config/prompt-templates";
 import { type Settings, settings } from "../config/settings";
 import { type ApprovalContext, runApprovalGate } from "../extensibility/custom-commands/bundled/workflow/approval";
-import { type WorkflowPhase, writeWorkflowArtifact } from "../extensibility/custom-commands/bundled/workflow/artifacts";
+import {
+	generateSlug,
+	readWorkflowState,
+	type WorkflowPhase,
+	writeWorkflowArtifact,
+} from "../extensibility/custom-commands/bundled/workflow/artifacts";
+import brainstormPrompt from "../extensibility/custom-commands/bundled/workflow/prompts/brainstorm-start.md" with {
+	type: "text",
+};
 import type { ExtensionUIContext, ExtensionUIDialogOptions } from "../extensibility/extensions";
 import type { CompactOptions } from "../extensibility/extensions/types";
 import { BUILTIN_SLASH_COMMANDS, loadSlashCommands } from "../extensibility/slash-commands";
@@ -150,6 +158,10 @@ export class InteractiveMode implements InteractiveModeContext {
 	#planModePreviousModel: Model | undefined;
 	#pendingModelSwitch: Model | undefined;
 	#planModeHasEntered = false;
+	#activeWorkflowSlug: string | null = null;
+	#activeWorkflowPhase: string | null = null;
+	#activeWorkflowPhases: string[] | null = null;
+	#proposedWorkflowPhases: { phases: string[]; rationale: string } | null = null;
 	readonly lspServers:
 		| Array<{ name: string; status: "ready" | "error"; fileTypes: string[]; error?: string }>
 		| undefined = undefined;
@@ -595,6 +607,9 @@ export class InteractiveMode implements InteractiveModeContext {
 					enabled: boolean;
 					paused: boolean;
 					readOnly?: boolean;
+					workflowSlug?: string;
+					workflowPhase?: string;
+					workflowPhases?: string[];
 			  }
 			| undefined;
 
@@ -605,6 +620,13 @@ export class InteractiveMode implements InteractiveModeContext {
 			};
 		} else if (readOnly) {
 			status = { enabled: false, paused: false, readOnly: true };
+		}
+
+		if (this.#activeWorkflowSlug) {
+			if (!status) status = { enabled: false, paused: false };
+			status.workflowSlug = this.#activeWorkflowSlug;
+			if (this.#activeWorkflowPhase) status.workflowPhase = this.#activeWorkflowPhase;
+			if (this.#activeWorkflowPhases) status.workflowPhases = this.#activeWorkflowPhases;
 		}
 
 		this.statusLine.setPlanModeStatus(status);
@@ -805,6 +827,57 @@ export class InteractiveMode implements InteractiveModeContext {
 		await this.#handleFinalStageApproval(details, stageContent);
 	}
 
+	setActiveWorkflow(slug: string | null, phase: string | null, phases: string[] | null): void {
+		this.#activeWorkflowSlug = slug;
+		this.#activeWorkflowPhase = phase;
+		this.#activeWorkflowPhases = phases;
+		this.#updatePlanModeStatus();
+	}
+
+	setProposePhases(proposal: { phases: string[]; rationale: string }): void {
+		this.#proposedWorkflowPhases = proposal;
+	}
+
+	async handleStartWorkflowTool(details: { topic: string; slug?: string }): Promise<void> {
+		const slug = details.slug ?? generateSlug(details.topic);
+		const workflowDir = `docs/workflow/${slug}`;
+
+		await this.session.abort();
+		await this.session.newSession({});
+
+		this.#activeWorkflowSlug = slug;
+		this.#activeWorkflowPhase = "brainstorm";
+		this.#activeWorkflowPhases = null;
+		this.#updatePlanModeStatus();
+
+		const prompt = renderPromptTemplate(brainstormPrompt, {
+			topic: details.topic,
+			workflowDir,
+			slug,
+			workflowPhase: "brainstorm",
+		});
+		if (this.onInputCallback) {
+			this.onInputCallback(this.startPendingSubmission({ text: prompt }));
+		}
+	}
+
+	async handleSwitchWorkflowTool(details: { slug: string; confirm?: boolean }): Promise<void> {
+		const cwd = this.sessionManager.getCwd();
+		const state = await readWorkflowState(cwd, details.slug);
+		if (!state) {
+			this.showError(`No workflow state found for slug "${details.slug}".`);
+			return;
+		}
+
+		if (!details.confirm) {
+			const choice = await this.showHookSelector(`Switch to workflow "${details.slug}"?`, ["Yes, switch", "Cancel"]);
+			if (choice !== "Yes, switch") return;
+		}
+
+		this.setActiveWorkflow(details.slug, state.currentPhase, state.activePhases ?? null);
+		this.showStatus(`Switched to workflow: ${details.slug} (phase: ${state.currentPhase})`);
+	}
+
 	async #handleFinalStageApproval(details: ExitPlanModeDetails, planContent: string): Promise<void> {
 		const choice = await this.showHookSelector("Plan mode - next step", [
 			"Approve and execute",
@@ -851,6 +924,33 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		this.#renderPlanPreview(content);
 
+		// For brainstorm phase: show phase proposal confirmation before approval gate
+		let approvedPhases: string[] | undefined;
+		if (phase === "brainstorm" && this.#proposedWorkflowPhases) {
+			const proposal = this.#proposedWorkflowPhases;
+			this.#proposedWorkflowPhases = null; // Clear immediately
+
+			const phaseList = proposal.phases.join(" → ");
+			const choice = await this.showHookSelector(`Proposed workflow phases: ${phaseList}`, [
+				"Accept",
+				"Edit phases",
+				"Reject (use global settings)",
+			]);
+
+			if (choice === "Accept") {
+				approvedPhases = proposal.phases;
+			} else if (choice === "Edit phases") {
+				const edited = await this.showHookInput("Edit phases (space or comma separated)", phaseList);
+				if (edited) {
+					approvedPhases = edited
+						.split(/[\s,→]+/)
+						.map(s => s.trim())
+						.filter(Boolean);
+				}
+			}
+			// "Reject": approvedPhases stays undefined → global settings used
+		}
+
 		const approvalCtx: ApprovalContext = {
 			select: (title, options) => this.showHookSelector(title, options),
 			input: (title, placeholder) => this.showHookInput(title, placeholder),
@@ -859,7 +959,6 @@ export class InteractiveMode implements InteractiveModeContext {
 		const result = await runApprovalGate(phase, approvalCtx);
 
 		if (result.reviewPrompt) {
-			// Inject agent review prompt back into session
 			if (this.onInputCallback) {
 				this.onInputCallback(this.startPendingSubmission({ text: result.reviewPrompt }));
 			}
@@ -874,16 +973,24 @@ export class InteractiveMode implements InteractiveModeContext {
 			return;
 		}
 
-		// Approved: persist artifact to docs/workflow/<slug>/<phase>.md
+		// Approved: persist artifact
 		const cwd = this.sessionManager.getCwd();
 		try {
-			await writeWorkflowArtifact(cwd, slug, phase, content);
+			await writeWorkflowArtifact(cwd, slug, phase, content, approvedPhases);
 			this.showStatus(`${phase} phase approved and saved to docs/workflow/${slug}/${phase}.md`);
 		} catch (error) {
 			this.showError(
 				`Failed to persist ${phase} artifact: ${error instanceof Error ? error.message : String(error)}`,
 			);
 			return;
+		}
+
+		// Update active workflow tracking from saved state
+		try {
+			const updatedState = await readWorkflowState(cwd, slug);
+			this.setActiveWorkflow(slug, phase, updatedState?.activePhases ?? null);
+		} catch {
+			this.setActiveWorkflow(slug, phase, null);
 		}
 
 		// If in plan mode, do the standard plan approval flow
@@ -897,7 +1004,6 @@ export class InteractiveMode implements InteractiveModeContext {
 				this.showError(`Failed to finalize plan: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		} else {
-			// Execution phase or workflow phase without plan mode
 			if (this.planModeEnabled) {
 				await this.#exitPlanMode();
 			}

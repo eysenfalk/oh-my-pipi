@@ -78,29 +78,41 @@ const planModeSegment: StatusLineSegment = {
 	id: "plan_mode",
 	render(ctx) {
 		const status = ctx.planMode;
-		if (!status) {
-			return { content: "", visible: false };
-		}
+		if (!status) return { content: "", visible: false };
 
-		// Read-only mode
-		if (status.readOnly) {
+		// Read-only mode (no workflow context needed)
+		if (status.readOnly && !status.workflowSlug) {
 			const content = withIcon(theme.icon.plan, "Read-Only");
 			return { content: theme.fg("warning", content), visible: true };
 		}
 
+		// Workflow active: show slug + phase + progress
+		if (status.workflowSlug) {
+			// Strip date prefix (YYYY-MM-DD-) and cap at 16 chars
+			const name = status.workflowSlug.replace(/^\d{4}-\d{2}-\d{2}-/, "").slice(0, 16);
+			let label = name;
+			if (status.workflowPhase) {
+				if (status.workflowPhases && status.workflowPhases.length > 0) {
+					const idx = status.workflowPhases.indexOf(status.workflowPhase);
+					const total = status.workflowPhases.length;
+					const progress = idx >= 0 ? ` ${idx + 1}/${total}` : "";
+					label += ` [${status.workflowPhase}${progress}]`;
+				} else {
+					label += ` [${status.workflowPhase}]`;
+				}
+			}
+			const icon = theme.icon.plan || "\u25cf";
+			const content = withIcon(icon, label);
+			const color = status.paused ? "warning" : "accent";
+			return { content: theme.fg(color, content), visible: true };
+		}
+
+		// Plan mode without workflow
 		if (!status.enabled && !status.paused) {
 			return { content: "", visible: false };
 		}
 
-		let label = status.paused ? "Plan \u23f8" : status.autoMode ? "Auto" : "Plan";
-		if (
-			status.stage &&
-			status.stageIndex !== undefined &&
-			status.totalStages !== undefined &&
-			status.totalStages > 1
-		) {
-			label += `: ${status.stage} ${status.stageIndex}/${status.totalStages}`;
-		}
+		const label = status.paused ? "Plan \u23f8" : "Plan";
 		const content = withIcon(theme.icon.plan, label);
 		const color = status.paused ? "warning" : "accent";
 		return { content: theme.fg(color, content), visible: true };

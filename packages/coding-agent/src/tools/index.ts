@@ -33,6 +33,7 @@ import { GrepTool } from "./grep";
 import { InspectImageTool } from "./inspect-image";
 import { NotebookTool } from "./notebook";
 import { wrapToolWithMetaNotice } from "./output-meta";
+import { ProposePhasesTool } from "./propose-phases";
 import { PythonTool } from "./python";
 import { ReadTool } from "./read";
 import { RenderMermaidTool } from "./render-mermaid";
@@ -40,7 +41,9 @@ import { ResolveTool } from "./resolve";
 import { reportFindingTool } from "./review";
 import { SearchToolBm25Tool } from "./search-tool-bm25";
 import { loadSshTool } from "./ssh";
+import { StartWorkflowTool } from "./start-workflow";
 import { SubmitResultTool } from "./submit-result";
+import { SwitchWorkflowTool } from "./switch-workflow";
 import { type TodoPhase, TodoWriteTool } from "./todo-write";
 import { WriteTool } from "./write";
 
@@ -216,6 +219,9 @@ export const HIDDEN_TOOLS: Record<string, ToolFactory> = {
 	report_finding: () => reportFindingTool,
 	exit_plan_mode: s => new ExitPlanModeTool(s),
 	resolve: s => new ResolveTool(s),
+	propose_phases: s => new ProposePhasesTool(s),
+	start_workflow: s => new StartWorkflowTool(s),
+	switch_workflow: s => new SwitchWorkflowTool(s),
 };
 
 export type ToolName = keyof typeof BUILTIN_TOOLS;

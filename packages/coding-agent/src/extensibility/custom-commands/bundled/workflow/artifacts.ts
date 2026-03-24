@@ -30,12 +30,17 @@ export async function readWorkflowArtifact(cwd: string, slug: string, phase: str
 }
 
 /** Write a workflow artifact and update state */
-export async function writeWorkflowArtifact(cwd: string, slug: string, phase: string, content: string): Promise<void> {
+export async function writeWorkflowArtifact(
+	cwd: string,
+	slug: string,
+	phase: string,
+	content: string,
+	activePhases?: string[],
+): Promise<void> {
 	const dir = resolveWorkflowDir(cwd, slug);
 	await fs.mkdir(dir, { recursive: true });
 	await Bun.write(path.join(dir, `${phase}.md`), content);
 
-	// Update state
 	const state = (await readWorkflowState(cwd, slug)) ?? {
 		slug,
 		currentPhase: phase,
@@ -43,6 +48,22 @@ export async function writeWorkflowArtifact(cwd: string, slug: string, phase: st
 	};
 	state.currentPhase = phase;
 	state.artifacts[phase] = path.join(WORKFLOW_DIR, slug, `${phase}.md`);
+	if (activePhases !== undefined) {
+		state.activePhases = activePhases;
+	}
+	await Bun.write(path.join(dir, "state.json"), JSON.stringify(state, null, 2));
+}
+
+/** Update only the activePhases field in workflow state */
+export async function updateWorkflowActivePhases(cwd: string, slug: string, phases: string[]): Promise<void> {
+	const dir = resolveWorkflowDir(cwd, slug);
+	await fs.mkdir(dir, { recursive: true });
+	const state = (await readWorkflowState(cwd, slug)) ?? {
+		slug,
+		currentPhase: "brainstorm",
+		artifacts: {},
+	};
+	state.activePhases = phases;
 	await Bun.write(path.join(dir, "state.json"), JSON.stringify(state, null, 2));
 }
 

@@ -407,6 +407,24 @@ export class EventController {
 						await this.ctx.handleExitPlanModeTool(details);
 					}
 				}
+				if (event.toolName === "propose_phases" && !event.isError) {
+					const details = event.result.details as { phases: string[]; rationale: string } | undefined;
+					if (details) {
+						this.ctx.setProposePhases(details);
+					}
+				}
+				if (event.toolName === "start_workflow" && !event.isError) {
+					const details = event.result.details as { topic: string; slug?: string } | undefined;
+					if (details) {
+						await this.ctx.handleStartWorkflowTool(details);
+					}
+				}
+				if (event.toolName === "switch_workflow" && !event.isError) {
+					const details = event.result.details as { slug: string; confirm?: boolean } | undefined;
+					if (details) {
+						await this.ctx.handleSwitchWorkflowTool(details);
+					}
+				}
 				break;
 			}
 

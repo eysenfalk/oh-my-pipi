@@ -9,6 +9,7 @@ import {
 	findActiveWorkflow,
 	formatWorkflowStatus,
 	generateSlug,
+	listWorkflows,
 	readWorkflowArtifact,
 	readWorkflowState,
 	type WorkflowPhase,
@@ -58,6 +59,10 @@ export class WorkflowCommand implements CustomCommand {
 				return this.#startVerify(rest, ctx);
 			case "finish":
 				return this.#startFinish(rest, ctx);
+			case "list":
+				return this.#listWorkflows(ctx);
+			case "switch":
+				return this.#switchWorkflow(rest, ctx);
 			case "resume":
 				return this.#resume(rest, ctx);
 			default:
@@ -229,6 +234,65 @@ export class WorkflowCommand implements CustomCommand {
 		}
 	}
 
+	async #switchWorkflow(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
+		if (!ctx.hasUI) return "Use in interactive mode to switch workflows.";
+
+		const slugs = await listWorkflows(ctx.cwd);
+		if (slugs.length === 0) {
+			ctx.ui.notify("No workflows found.", "info");
+			return undefined;
+		}
+
+		const selected = rest[0] ?? (await ctx.ui.select("Switch to workflow", slugs));
+		if (!selected) return undefined;
+
+		const state = await readWorkflowState(ctx.cwd, selected);
+		if (!state) {
+			ctx.ui.notify(`No state found for workflow "${selected}".`, "error");
+			return undefined;
+		}
+
+		ctx.ui.setEditorText(`/workflow resume ${selected}`);
+		ctx.ui.notify(`Switched to workflow: ${selected} [${state.currentPhase}]`, "info");
+		return undefined;
+	}
+
+	async #listWorkflows(ctx: HookCommandContext): Promise<string | undefined> {
+		const slugs = await listWorkflows(ctx.cwd);
+		if (slugs.length === 0) {
+			if (ctx.hasUI) {
+				ctx.ui.notify("No workflows found.", "info");
+				return undefined;
+			}
+			return "No workflows found.";
+		}
+
+		if (!ctx.hasUI) {
+			const lines = ["Available workflows:"];
+			for (const slug of slugs) {
+				const state = await readWorkflowState(ctx.cwd, slug);
+				lines.push(`  ${slug}${state ? ` [${state.currentPhase}]` : ""}`);
+			}
+			return lines.join("\n");
+		}
+
+		// Build display list with phase status for each workflow
+		const items: string[] = [];
+		for (const slug of slugs) {
+			const state = await readWorkflowState(ctx.cwd, slug);
+			items.push(state ? `${slug}  [${state.currentPhase}]` : slug);
+		}
+
+		// Use select as a browsable list; selecting one pre-fills the resume command
+		const selected = await ctx.ui.select("Workflows", items);
+		if (!selected) return undefined;
+
+		// Extract slug from display string (format: "slug  [phase]" or just "slug")
+		const slug = selected.split("  ")[0];
+		ctx.ui.setEditorText(`/workflow resume ${slug}`);
+		return undefined;
+	}
+
 	#getNextPhase(state: WorkflowState): string | null {
 		const order: WorkflowPhase[] = ["brainstorm", "spec", "design", "plan", "execute", "verify", "finish"];
 		const currentIdx = order.indexOf(state.currentPhase as WorkflowPhase);
@@ -236,9 +300,13 @@ export class WorkflowCommand implements CustomCommand {
 
 		for (let i = currentIdx + 1; i < order.length; i++) {
 			const phase = order[i];
-			const enabled = settings.get(`workflow.phases.${phase}.enabled` as SettingPath);
-			if (enabled !== false) {
-				return phase;
+			if (state.activePhases) {
+				// Use slug-level active phases
+				if (state.activePhases.includes(phase)) return phase;
+			} else {
+				// Fall back to global settings
+				const enabled = settings.get(`workflow.phases.${phase}.enabled` as SettingPath);
+				if (enabled !== false) return phase;
 			}
 		}
 		return null;
@@ -252,8 +320,17 @@ export class WorkflowCommand implements CustomCommand {
 
 	/** Check if a prerequisite phase has a persisted artifact, respecting whether the phase is enabled. */
 	async #checkPrereq(cwd: string, slug: string, prereq: WorkflowPhase): Promise<string | null> {
-		const enabled = settings.get(`workflow.phases.${prereq}.enabled` as SettingPath);
-		if (enabled === false) return null;
+		// Read slug-level config first
+		const state = await readWorkflowState(cwd, slug);
+		if (state?.activePhases) {
+			// Phase not in this slug's active phases — skip it
+			if (!state.activePhases.includes(prereq)) return null;
+			// Phase is in active phases — must have artifact
+		} else {
+			// No slug-level config: fall back to global settings
+			const enabled = settings.get(`workflow.phases.${prereq}.enabled` as SettingPath);
+			if (enabled === false) return null;
+		}
 		const content = await readWorkflowArtifact(cwd, slug, prereq);
 		if (!content)
 			return `Phase "${prereq}" has not been completed for workflow "${slug}". Run /workflow ${prereq} first.`;

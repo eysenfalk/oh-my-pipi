@@ -1,0 +1,10 @@
+{
+  "slug": "2026-03-23-plan",
+  "currentPhase": "plan",
+  "artifacts": {
+    "understand": "docs/workflow/2026-03-23-plan/understand.md",
+    "design": "docs/workflow/2026-03-23-plan/design.md",
+    "review": "docs/workflow/2026-03-23-plan/review.md",
+    "plan": "docs/workflow/2026-03-23-plan/plan.md"
+  }
+}

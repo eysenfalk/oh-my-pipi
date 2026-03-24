@@ -58,11 +58,10 @@ export class StatusLineComponent implements Component {
 	#planModeStatus: {
 		enabled: boolean;
 		paused: boolean;
-		autoMode?: boolean;
-		stage?: string;
-		stageIndex?: number;
-		totalStages?: number;
 		readOnly?: boolean;
+		workflowSlug?: string;
+		workflowPhase?: string;
+		workflowPhases?: string[];
 	} | null = null;
 
 	// Git status caching (1s TTL)
@@ -110,11 +109,10 @@ export class StatusLineComponent implements Component {
 			| {
 					enabled: boolean;
 					paused: boolean;
-					autoMode?: boolean;
-					stage?: string;
-					stageIndex?: number;
-					totalStages?: number;
 					readOnly?: boolean;
+					workflowSlug?: string;
+					workflowPhase?: string;
+					workflowPhases?: string[];
 			  }
 			| undefined,
 	): void {

@@ -4,4 +4,5 @@ export interface PlanModeState {
 	workflow?: "parallel" | "iterative";
 	reentry?: boolean;
 	workflowSlug?: string;
+	activeWorkflowPhase?: string;
 }

@@ -23,11 +23,10 @@ export interface SegmentContext {
 	planMode: {
 		enabled: boolean;
 		paused: boolean;
-		autoMode?: boolean;
-		stage?: string;
-		stageIndex?: number;
-		totalStages?: number;
 		readOnly?: boolean;
+		workflowSlug?: string;
+		workflowPhase?: string;
+		workflowPhases?: string[];
 	} | null;
 	// Cached values for performance (computed once per render)
 	usageStats: {

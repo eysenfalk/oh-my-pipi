@@ -218,6 +218,9 @@ export interface InteractiveModeContext {
 	openExternalEditor(): void;
 	registerExtensionShortcuts(): void;
 	handleExitPlanModeTool(details: ExitPlanModeDetails): Promise<void>;
+	setProposePhases(proposal: { phases: string[]; rationale: string }): void;
+	handleStartWorkflowTool(details: { topic: string; slug?: string }): Promise<void>;
+	handleSwitchWorkflowTool(details: { slug: string; confirm?: boolean }): Promise<void>;
 	handleReadOnlyCommand(): Promise<void>;
 	handleWorkflowConfigCommand(): Promise<void>;
 
