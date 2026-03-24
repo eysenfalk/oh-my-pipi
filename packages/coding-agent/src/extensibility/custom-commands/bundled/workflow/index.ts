@@ -8,16 +8,16 @@ import type { CustomCommand } from "../../types";
 import {
 	findActiveWorkflow,
 	formatWorkflowStatus,
-	generateSlug,
 	getActiveWorkflowSlug,
+	getNextPhase,
 	listWorkflows,
+	PHASES,
 	readWorkflowArtifact,
 	readWorkflowState,
 	resolveWorkflowDir,
 	setActiveWorkflowSlug,
 	WORKFLOW_DIR,
 	type WorkflowPhase,
-	type WorkflowState,
 	writeWorkflowArtifact,
 } from "./artifacts";
 import { createWorkflowConfigComponent } from "./config-component";
@@ -73,7 +73,7 @@ export class WorkflowCommand implements CustomCommand {
 			case "status":
 				return this.#showDetailedStatus(rest, ctx);
 			case "back":
-				return "The /workflow back command is not yet implemented.";
+				return this.#goBack(rest, ctx);
 			case "delete":
 				return this.#deleteWorkflow(rest, ctx);
 			case "rename":
@@ -103,12 +103,9 @@ export class WorkflowCommand implements CustomCommand {
 			if (!input) return undefined;
 			return this.#startBrainstorm([input], ctx);
 		}
-
-		const slug = generateSlug(topic);
-		const workflowDir = path.join(WORKFLOW_DIR, slug);
-
-		await ctx.newSession();
-		return renderPromptTemplate(brainstormPrompt, { topic, workflowDir, slug, workflowPhase: "brainstorm" });
+		// Delegate to context — handles slug confirmation, collision, state creation, new session
+		await ctx.startWorkflow({ topic });
+		return undefined;
 	}
 
 	async #resolveSlug(rest: string[], ctx: HookCommandContext): Promise<string | null> {
@@ -130,6 +127,7 @@ export class WorkflowCommand implements CustomCommand {
 		const workflowDir = path.join(WORKFLOW_DIR, slug);
 		const brainstormRef = await this.#artifactRef(ctx.cwd, slug, "brainstorm");
 		const setup = await this.#populateLocalSetup(ctx.cwd, slug, ["brainstorm"]);
+		ctx.activateWorkflowPhase(slug, "spec");
 		await ctx.newSession({ setup });
 		return renderPromptTemplate(specPrompt, { workflowDir, brainstormRef, slug, workflowPhase: "spec" });
 	}
@@ -146,6 +144,7 @@ export class WorkflowCommand implements CustomCommand {
 		const brainstormRef = await this.#artifactRef(ctx.cwd, slug, "brainstorm");
 
 		const setup = await this.#populateLocalSetup(ctx.cwd, slug, ["brainstorm", "spec"]);
+		ctx.activateWorkflowPhase(slug, "design");
 		await ctx.newSession({ setup });
 		return renderPromptTemplate(designPrompt, { workflowDir, specRef, brainstormRef, slug, workflowPhase: "design" });
 	}
@@ -162,6 +161,7 @@ export class WorkflowCommand implements CustomCommand {
 		const designRef = await this.#artifactRef(ctx.cwd, slug, "design");
 
 		const setup = await this.#populateLocalSetup(ctx.cwd, slug, ["brainstorm", "spec", "design"]);
+		ctx.activateWorkflowPhase(slug, "plan");
 		await ctx.newSession({ setup });
 		return renderPromptTemplate(planPrompt, { workflowDir, specRef, designRef, slug, workflowPhase: "plan" });
 	}
@@ -175,9 +175,11 @@ export class WorkflowCommand implements CustomCommand {
 
 		const planRef = await this.#artifactRef(ctx.cwd, slug, "plan");
 		const specRef = await this.#artifactRef(ctx.cwd, slug, "spec");
+		const designRef = await this.#artifactRef(ctx.cwd, slug, "design");
 		const setup = await this.#populateLocalSetup(ctx.cwd, slug, ["brainstorm", "spec", "design", "plan"]);
+		ctx.activateWorkflowPhase(slug, "execute");
 		await ctx.newSession({ setup });
-		return renderPromptTemplate(executePrompt, { planRef, specRef, slug, workflowPhase: "execute" });
+		return renderPromptTemplate(executePrompt, { planRef, specRef, designRef, slug, workflowPhase: "execute" });
 	}
 
 	async #startVerify(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
@@ -193,6 +195,7 @@ export class WorkflowCommand implements CustomCommand {
 		if (prereqError) return prereqError;
 
 		const setup = await this.#populateLocalSetup(ctx.cwd, slug, ["brainstorm", "spec", "design", "plan", "execute"]);
+		ctx.activateWorkflowPhase(slug, "verify");
 		await ctx.newSession({ setup });
 		return renderPromptTemplate(verifyPrompt, { specRef, planRef, slug, workflowPhase: "verify" });
 	}
@@ -212,6 +215,7 @@ export class WorkflowCommand implements CustomCommand {
 			"execute",
 			"verify",
 		]);
+		ctx.activateWorkflowPhase(slug, "finish");
 		await ctx.newSession({ setup });
 		return renderPromptTemplate(finishPrompt, { slug, workflowPhase: "finish" });
 	}
@@ -223,14 +227,23 @@ export class WorkflowCommand implements CustomCommand {
 		const state = await readWorkflowState(ctx.cwd, slug);
 		if (!state) return `No state found for workflow "${slug}".`;
 
-		// Determine the next phase based on current state
-		const nextPhase = this.#getNextPhase(state);
+		const nextPhase = getNextPhase(state);
 		if (!nextPhase) {
-			return `Workflow "${slug}" is in the "${state.currentPhase}" phase. All phases complete or unknown next step.\n\n${formatWorkflowStatus(state)}`;
+			return `Workflow "${slug}" has completed all phases.\n\n${formatWorkflowStatus(state)}`;
 		}
+		return this.#dispatchToPhase(nextPhase, slug, ctx);
+	}
 
-		// Dispatch to the appropriate phase handler
-		switch (nextPhase) {
+	async #dispatchToPhase(phase: WorkflowPhase, slug: string, ctx: HookCommandContext): Promise<string | undefined> {
+		switch (phase) {
+			case "brainstorm": {
+				// Re-entry: derive topic from slug, activate phase, new session, return prompt
+				const topic = slug.replace(/^\d{4}-\d{2}-\d{2}-/, "").replace(/-/g, " ");
+				const workflowDir = path.join(WORKFLOW_DIR, slug);
+				ctx.activateWorkflowPhase(slug, "brainstorm");
+				await ctx.newSession();
+				return renderPromptTemplate(brainstormPrompt, { topic, workflowDir, slug, workflowPhase: "brainstorm" });
+			}
 			case "spec":
 				return this.#startSpec([slug], ctx);
 			case "design":
@@ -244,8 +257,35 @@ export class WorkflowCommand implements CustomCommand {
 			case "finish":
 				return this.#startFinish([slug], ctx);
 			default:
-				return `Workflow "${slug}" is at phase "${state.currentPhase}". Resume manually with /workflow <phase> ${slug}.`;
+				return `Unknown phase "${phase}". Resume manually with /workflow <phase> ${slug}.`;
 		}
+	}
+
+	async #goBack(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
+		const slug = await this.#resolveSlug(rest.slice(1), ctx);
+		if (!slug) return "No workflow slug specified and no active workflow found.";
+		const state = await readWorkflowState(ctx.cwd, slug);
+		if (!state) return `No state found for workflow "${slug}".`;
+
+		// If phase specified directly
+		if (rest[0] && PHASES.includes(rest[0] as WorkflowPhase)) {
+			const phase = rest[0] as WorkflowPhase;
+			return this.#dispatchToPhase(phase, slug, ctx);
+		}
+
+		// Show completed phases (those with artifacts)
+		const completedPhases = PHASES.filter(p => !!state.artifacts[p]);
+		if (completedPhases.length === 0) {
+			return `No completed phases found for workflow "${slug}".`;
+		}
+
+		if (!ctx.hasUI) {
+			return `Usage: /workflow back <phase> [slug]\nCompleted: ${completedPhases.join(", ")}`;
+		}
+
+		const selected = await ctx.ui.select("Re-enter phase", completedPhases as string[]);
+		if (!selected) return undefined;
+		return this.#dispatchToPhase(selected as WorkflowPhase, slug, ctx);
 	}
 
 	async #switchWorkflow(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
@@ -415,25 +455,6 @@ export class WorkflowCommand implements CustomCommand {
 		}
 
 		return `Workflow "${slug}" marked as abandoned.`;
-	}
-
-	#getNextPhase(state: WorkflowState): string | null {
-		const order: WorkflowPhase[] = ["brainstorm", "spec", "design", "plan", "execute", "verify", "finish"];
-		const currentIdx = order.indexOf(state.currentPhase as WorkflowPhase);
-		if (currentIdx === -1) return null;
-
-		for (let i = currentIdx + 1; i < order.length; i++) {
-			const phase = order[i];
-			if (state.activePhases) {
-				// Use slug-level active phases
-				if (state.activePhases.includes(phase)) return phase;
-			} else {
-				// Fall back to global settings
-				const enabled = settings.get(`workflow.phases.${phase}.enabled` as SettingPath);
-				if (enabled !== false) return phase;
-			}
-		}
-		return null;
 	}
 
 	async #artifactRef(cwd: string, slug: string, phase: string): Promise<string | null> {

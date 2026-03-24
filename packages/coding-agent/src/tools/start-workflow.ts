@@ -28,7 +28,8 @@ export class StartWorkflowTool implements AgentTool<typeof startWorkflowSchema, 
 	readonly parameters = startWorkflowSchema;
 	readonly strict = true;
 
-	constructor(readonly _session: ToolSession) {}
+	// biome-ignore lint/complexity/noUselessConstructor: required by tool factory
+	constructor(_session: ToolSession) {}
 
 	async execute(
 		_toolCallId: string,

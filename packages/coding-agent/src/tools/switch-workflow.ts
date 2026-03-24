@@ -28,7 +28,8 @@ export class SwitchWorkflowTool implements AgentTool<typeof switchWorkflowSchema
 	readonly parameters = switchWorkflowSchema;
 	readonly strict = true;
 
-	constructor(readonly _session: ToolSession) {}
+	// biome-ignore lint/complexity/noUselessConstructor: required by tool factory
+	constructor(_session: ToolSession) {}
 
 	async execute(
 		_toolCallId: string,
