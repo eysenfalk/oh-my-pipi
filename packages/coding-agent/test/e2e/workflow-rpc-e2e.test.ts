@@ -218,7 +218,7 @@ describe.skipIf(!API_KEY)("Workflow RPC E2E (MiniMax M2.7)", () => {
 		fs.writeFileSync(path.join(workDir, "docs", "workflow", ".active"), slug);
 
 		// Start spec phase — returns prompt string, agent processes it
-		const eventsPromise = collectUntilIdle(client, 240_000);
+		const eventsPromise = collectUntilIdle(client, 600_000);
 		client.prompt(`/workflow spec ${slug}`);
 
 		const events = await eventsPromise;
@@ -227,7 +227,7 @@ describe.skipIf(!API_KEY)("Workflow RPC E2E (MiniMax M2.7)", () => {
 		// Agent turn started — prerequisites were satisfied, prompt was submitted
 		expect(events.some(e => e.type === "agent_start")).toBe(true);
 		expect(events.some(e => e.type === "agent_end")).toBe(true);
-	}, 240_000);
+	}, 600_000);
 
 	// -----------------------------------------------------------------------
 	// Prerequisite enforcement
