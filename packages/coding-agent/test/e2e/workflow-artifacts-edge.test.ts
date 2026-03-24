@@ -516,7 +516,7 @@ describe("Workflow Artifacts — edge cases", () => {
 			const result = formatWorkflowStatus(state);
 			expect(result).toContain("Artifacts:");
 			const lines = result.split("\n");
-			const artifactsIdx = lines.findIndex(l => l === "Artifacts:");
+			const artifactsIdx = lines.indexOf("Artifacts:");
 			// Nothing after the Artifacts: line
 			expect(lines.slice(artifactsIdx + 1).every(l => l === "")).toBe(true);
 		});

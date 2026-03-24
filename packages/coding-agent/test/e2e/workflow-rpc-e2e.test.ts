@@ -183,6 +183,7 @@ describe.skipIf(!API_KEY)("Workflow RPC E2E (MiniMax M2.7)", () => {
 		expect(slugDirs.length).toBeGreaterThanOrEqual(1);
 
 		const slug = slugDirs[0]!;
+		expect(slug).toMatch(/^\d{4}-\d{2}-\d{2}-/);
 		const stateFile = path.join(workflowDir, slug, "state.json");
 		expect(fs.existsSync(stateFile)).toBe(true);
 
@@ -271,7 +272,10 @@ describe.skipIf(!API_KEY)("Workflow RPC E2E (MiniMax M2.7)", () => {
 		const notifications = await notificationsPromise;
 
 		// Should have received info notification(s)
-		expect(notifications.length).toBeGreaterThanOrEqual(1);
+		const listSelect = notifications.find(n => n.method === "select");
+		expect(listSelect).toBeDefined();
+		const listOptions = (listSelect as { options: string[] }).options;
+		expect(listOptions.some(o => o.includes("test-list-slug"))).toBe(true);
 	}, 15_000);
 
 	test("workflow status shows current state via notification", async () => {
@@ -294,7 +298,9 @@ describe.skipIf(!API_KEY)("Workflow RPC E2E (MiniMax M2.7)", () => {
 		await client.prompt(`/workflow status ${slug}`);
 		const notifications = await notificationsPromise;
 
-		expect(notifications.length).toBeGreaterThanOrEqual(1);
+		const statusNotify = notifications.find(n => n.method === "notify");
+		expect(statusNotify).toBeDefined();
+		expect((statusNotify as { message: string }).message).toContain("test-status-slug");
 	}, 15_000);
 
 	test("workflow delete removes workflow files", async () => {
@@ -316,7 +322,9 @@ describe.skipIf(!API_KEY)("Workflow RPC E2E (MiniMax M2.7)", () => {
 		removeHandler();
 
 		// Should have received at least one notification
-		expect(notifications.length).toBeGreaterThanOrEqual(1);
+		const deleteNotify = notifications.find(n => n.method === "notify");
+		expect(deleteNotify).toBeDefined();
+		expect((deleteNotify as { message: string }).message).toContain("test-delete-slug");
 
 		// Workflow directory should be gone after delete
 		expect(fs.existsSync(wfDir)).toBe(false);

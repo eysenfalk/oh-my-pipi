@@ -7,13 +7,11 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { _resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import {
 	createWorkflowState,
 	getActiveWorkflowSlug,
-	readWorkflowArtifact,
 	readWorkflowState,
 	resolveWorkflowDir,
 	setActiveWorkflowSlug,
@@ -552,7 +550,7 @@ describe("WorkflowCommand — edge cases", () => {
 			// We can't easily reach the default branch via normal routing.
 			// Use 'resume' with a state whose currentPhase is exhausted (all phases done → getNextPhase=null)
 			// That goes to #info not #infoError. Let's test the error branch via direct phase manipulation:
-			const stateDir = resolveWorkflowDir(tempDir, slug);
+			const _stateDir = resolveWorkflowDir(tempDir, slug);
 			const state = await readWorkflowState(tempDir, slug);
 			expect(state).not.toBeNull();
 			if (!state) return;

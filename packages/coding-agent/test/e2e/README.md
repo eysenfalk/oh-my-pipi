@@ -4,12 +4,11 @@ End-to-end integration tests for the OMP workflow system. Tests the full orchest
 
 ## Architecture
 
-### Three test layers
-
 | Layer | Tests | Runtime | LLM | CI |
 |---|---|---|---|---|
 | **Deterministic** | State machine, file I/O, prerequisites, approval, commands, prompts, events | ~2s | None | Always |
 | **TUI Wiring** | Keyboard navigation, selector/input/config components, approval flows | ~2s | None | Always |
+| **Orchestration** | InteractiveMode integration: handleExitPlanModeTool, approval gates, artifact persistence, phase transitions, user journeys | ~2s | None | Always |
 | **RPC E2E** | Full workflow via RPC protocol with real LLM | 60-240s/test | MiniMax M2.7 | Gated |
 
 ### File layout
@@ -30,15 +29,18 @@ test/e2e/
   tui-workflow.test.ts             # 19 tests — HookSelector/Input basics
   tui-workflow-advanced.test.ts    # 35 tests — countdown, config component, all keys
   
+  # Orchestration tests (InteractiveMode integration)
+  workflow-orchestration.test.ts   # 38 tests — handleExitPlanModeTool, approval gates, user journeys
+  
   # Real LLM tests (gated)
   workflow-rpc-e2e.test.ts         #  7 tests — real LLM via RPC (MiniMax M2.7)
   
   # Harnesses
   workflow-harness.ts              # MockHookCommandContext, assertion helpers
+  interactive-mode-harness.ts      # InteractiveMode + VirtualTerminal + patched UI
   tui-harness.ts                   # VirtualTerminal TUI environment
-```
 
-**Total: 412 tests (405 deterministic + 7 gated)**
+**Total: 450 tests (443 deterministic + 7 gated)**
 
 ## Running tests
 

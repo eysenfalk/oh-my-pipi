@@ -58,7 +58,7 @@ describe("Workflow E2E — WorkflowCommand", () => {
 			// showHelp calls ctx.ui.notify with help text
 			const notifications = getNotifications(ctx);
 			// Should have notified something (either status error or help)
-			expect(notifications.length).toBeGreaterThanOrEqual(0);
+			expect(notifications.some(n => n.message.includes("/workflow"))).toBe(true);
 		});
 
 		test("unknown subcommand shows help", async () => {
@@ -73,7 +73,8 @@ describe("Workflow E2E — WorkflowCommand", () => {
 			await cmd.execute(["brainstorm"], asCtx(ctx));
 			// Should have called ui.input for topic
 			const inputCalls = ctx.ui.calls.filter(c => c.method === "input");
-			expect(inputCalls.length).toBeGreaterThanOrEqual(1);
+			expect(inputCalls.length).toBe(1);
+			expect(inputCalls[0].args[0]).toBe("Brainstorm topic");
 			// Should have called startWorkflow with the provided topic
 			const startActions = getActions(ctx, "startWorkflow");
 			expect(startActions.length).toBe(1);
@@ -232,7 +233,7 @@ describe("Workflow E2E — WorkflowCommand", () => {
 			expect(typeof result).toBe("string");
 			// Prompt should reference the brainstorm artifact
 			const prompt = result as string;
-			expect(prompt.length).toBeGreaterThan(50);
+			expect(prompt).toContain("docs/workflow/2024-01-01-test-phases/brainstorm.md");
 		});
 
 		test("design returns prompt with spec and brainstorm references", async () => {
@@ -244,7 +245,8 @@ describe("Workflow E2E — WorkflowCommand", () => {
 
 			expect(typeof result).toBe("string");
 			const prompt = result as string;
-			expect(prompt.length).toBeGreaterThan(50);
+			expect(prompt).toContain("docs/workflow/2024-01-01-test-phases/spec.md");
+			expect(prompt).toContain("docs/workflow/2024-01-01-test-phases/brainstorm.md");
 
 			// Should activate design phase and start new session
 			expect(getActions(ctx, "activateWorkflowPhase")[0].args[1]).toBe("design");
@@ -530,9 +532,9 @@ describe("Workflow E2E — WorkflowCommand", () => {
 
 			await cmd.execute(["list"], asCtx(ctx));
 
-			// Non-UI mode: #info doesn't notify (hasUI is false)
-			// The return value would have been the text, but we can't easily capture it
-			// At minimum, no crashes
+			// Non-UI mode must not fall through to the interactive select path
+			const selectCalls = ctx.ui.calls.filter(c => c.method === "select");
+			expect(selectCalls.length).toBe(0);
 		});
 	});
 
@@ -702,7 +704,8 @@ describe("Workflow E2E — WorkflowCommand", () => {
 			expect(typeof result).toBe("string");
 			// The prompt template uses {{brainstormRef}} and {{specRef}} which are artifact file paths
 			// We can verify the prompt is non-trivial and was rendered
-			expect((result as string).length).toBeGreaterThan(100);
+			expect(result as string).toContain("docs/workflow/2024-01-01-data-flow/brainstorm.md");
+			expect(result as string).toContain("docs/workflow/2024-01-01-data-flow/spec.md");
 		});
 
 		test("verify phase has access to spec for acceptance criteria checking", async () => {
@@ -716,7 +719,7 @@ describe("Workflow E2E — WorkflowCommand", () => {
 			const result = await cmd.execute(["verify", slug], asCtx(ctx));
 			expect(typeof result).toBe("string");
 			// Verify phase prompt should be rendered with spec reference
-			expect((result as string).length).toBeGreaterThan(100);
+			expect(result as string).toContain("docs/workflow/2024-01-01-data-flow/spec.md");
 		});
 	});
 
