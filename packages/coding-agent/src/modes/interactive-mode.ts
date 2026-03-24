@@ -21,6 +21,7 @@ import {
 import {
 	createWorkflowState,
 	generateSlug,
+	getNextPhase,
 	readWorkflowState,
 	setActiveWorkflowSlug,
 	WORKFLOW_DIR,
@@ -1077,9 +1078,16 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 
 		// Update active workflow tracking from saved state
+		let nextPhase: WorkflowPhase | null = null;
 		try {
 			const updatedState = await readWorkflowState(cwd, slug);
-			this.setActiveWorkflow(slug, phase, updatedState?.activePhases ?? null);
+			// Show the NEXT expected phase in status bar, not the completed one
+			nextPhase = updatedState ? getNextPhase(updatedState) : null;
+			this.setActiveWorkflow(
+				slug,
+				nextPhase ?? phase, // fall back to completed phase if no next
+				updatedState?.activePhases ?? null,
+			);
 		} catch {
 			this.setActiveWorkflow(slug, phase, null);
 		}
@@ -1097,6 +1105,17 @@ export class InteractiveMode implements InteractiveModeContext {
 		} else {
 			if (this.planModeEnabled) {
 				await this.#exitPlanMode();
+			}
+		}
+
+		// After plan mode exit, offer to continue to next phase
+		if (nextPhase) {
+			const continueChoice = await this.showHookSelector(`${phase} approved. Continue to ${nextPhase}?`, [
+				"Continue",
+				"Stop here",
+			]);
+			if (continueChoice === "Continue") {
+				this.editor.setText(`/workflow ${nextPhase} ${slug}`);
 			}
 		}
 	}
