@@ -3,6 +3,7 @@ import type { AssistantMessage, ImageContent, Message, UsageReport } from "@oh-m
 import type { Component, Container, Loader, Spacer, Text, TUI } from "@oh-my-pi/pi-tui";
 import type { KeybindingsManager } from "../config/keybindings";
 import type { Settings } from "../config/settings";
+import type { WorkflowPhase } from "../extensibility/custom-commands/bundled/workflow/artifacts";
 import type { ExtensionUIContext, ExtensionUIDialogOptions } from "../extensibility/extensions";
 import type { CompactOptions } from "../extensibility/extensions/types";
 import type { MCPManager } from "../mcp";
@@ -221,6 +222,11 @@ export interface InteractiveModeContext {
 	setProposePhases(proposal: { phases: string[]; rationale: string }): void;
 	handleStartWorkflowTool(details: { topic: string; slug?: string }): Promise<void>;
 	handleSwitchWorkflowTool(details: { slug: string; confirm?: boolean }): Promise<void>;
+	setActiveWorkflow(
+		slug: string | null,
+		phase: WorkflowPhase | string | null,
+		phases: WorkflowPhase[] | string[] | null,
+	): void;
 	handleReadOnlyCommand(): Promise<void>;
 	handleWorkflowConfigCommand(): Promise<void>;
 

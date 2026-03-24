@@ -1,6 +1,7 @@
 import type { Component, OverlayHandle, TUI } from "@oh-my-pi/pi-tui";
 import { Spacer, Text } from "@oh-my-pi/pi-tui";
 import { logger } from "@oh-my-pi/pi-utils";
+import { setActiveWorkflowSlug } from "../../extensibility/custom-commands/bundled/workflow/artifacts";
 import type {
 	ExtensionActions,
 	ExtensionCommandContextActions,
@@ -236,6 +237,17 @@ export class ExtensionUiController {
 				await this.ctx.reloadTodos();
 				return { cancelled: false };
 			},
+			startWorkflow: async details => {
+				await this.ctx.handleStartWorkflowTool(details);
+			},
+			activateWorkflowPhase: (slug, phase, phases) => {
+				this.ctx.setActiveWorkflow(slug, phase, phases ?? null);
+				const cwd = this.ctx.sessionManager.getCwd();
+				void setActiveWorkflowSlug(cwd, slug);
+			},
+			switchWorkflow: async details => {
+				await this.ctx.handleSwitchWorkflowTool(details);
+			},
 		};
 
 		extensionRunner.initialize(actions, contextActions, commandActions, uiContext);
@@ -439,6 +451,20 @@ export class ExtensionUiController {
 				this.ctx.renderInitialMessages();
 				await this.ctx.reloadTodos();
 				return { cancelled: false };
+			},
+			startWorkflow: async details => {
+				if (this.ctx.isBackgrounded) return;
+				await this.ctx.handleStartWorkflowTool(details);
+			},
+			activateWorkflowPhase: (slug, phase, phases) => {
+				if (this.ctx.isBackgrounded) return;
+				this.ctx.setActiveWorkflow(slug, phase, phases ?? null);
+				const cwd = this.ctx.sessionManager.getCwd();
+				void setActiveWorkflowSlug(cwd, slug);
+			},
+			switchWorkflow: async details => {
+				if (this.ctx.isBackgrounded) return;
+				await this.ctx.handleSwitchWorkflowTool(details);
 			},
 		};
 

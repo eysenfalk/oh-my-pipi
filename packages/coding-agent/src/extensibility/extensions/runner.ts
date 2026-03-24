@@ -8,6 +8,7 @@ import { logger } from "@oh-my-pi/pi-utils";
 import type { ModelRegistry } from "../../config/model-registry";
 import { type Theme, theme } from "../../modes/theme/theme";
 import type { SessionManager } from "../../session/session-manager";
+import type { WorkflowPhase } from "../custom-commands/bundled/workflow/artifacts";
 import type {
 	BeforeAgentStartEvent,
 	BeforeAgentStartEventResult,
@@ -172,6 +173,10 @@ export class ExtensionRunner {
 	#navigateTreeHandler: NavigateTreeHandler = async () => ({ cancelled: false });
 	#switchSessionHandler: SwitchSessionHandler = async () => ({ cancelled: false });
 	#reloadHandler: () => Promise<void> = async () => {};
+	#startWorkflowHandler: (details: { topic: string; slug?: string }) => Promise<void> = async () => {};
+	#activateWorkflowPhaseHandler: (slug: string, phase: WorkflowPhase, phases?: WorkflowPhase[] | null) => void =
+		() => {};
+	#switchWorkflowHandler: (details: { slug: string; confirm?: boolean }) => Promise<void> = async () => {};
 	#shutdownHandler: ShutdownHandler = () => {};
 	#commandDiagnostics: Array<{ type: string; message: string; path: string }> = [];
 
@@ -221,6 +226,10 @@ export class ExtensionRunner {
 			this.#reloadHandler = commandContextActions.reload;
 			this.#getContextUsageFn = commandContextActions.getContextUsage;
 			this.#compactFn = commandContextActions.compact;
+			if (commandContextActions.startWorkflow) this.#startWorkflowHandler = commandContextActions.startWorkflow;
+			if (commandContextActions.activateWorkflowPhase)
+				this.#activateWorkflowPhaseHandler = commandContextActions.activateWorkflowPhase;
+			if (commandContextActions.switchWorkflow) this.#switchWorkflowHandler = commandContextActions.switchWorkflow;
 		}
 
 		this.#uiContext = uiContext ?? noOpUIContext;
@@ -414,6 +423,9 @@ export class ExtensionRunner {
 			switchSession: sessionPath => this.#switchSessionHandler(sessionPath),
 			reload: () => this.#reloadHandler(),
 			compact: instructionsOrOptions => this.#compactFn(instructionsOrOptions),
+			startWorkflow: details => this.#startWorkflowHandler(details),
+			activateWorkflowPhase: (slug, phase, phases) => this.#activateWorkflowPhaseHandler(slug, phase, phases),
+			switchWorkflow: details => this.#switchWorkflowHandler(details),
 		};
 	}
 

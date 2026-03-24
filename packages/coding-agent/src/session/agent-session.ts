@@ -2625,6 +2625,9 @@ export class AgentSession {
 				await this.reload();
 			},
 			getSystemPrompt: () => this.systemPrompt,
+			startWorkflow: async () => {},
+			activateWorkflowPhase: () => {},
+			switchWorkflow: async () => {},
 		};
 	}
 

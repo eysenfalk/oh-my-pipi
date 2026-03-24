@@ -54,6 +54,7 @@ import type {
 } from "../../tools";
 import type { TodoItem } from "../../tools/todo-write";
 import type { EventBus } from "../../utils/event-bus";
+import type { WorkflowPhase } from "../custom-commands/bundled/workflow/artifacts";
 import type { SlashCommandInfo } from "../slash-commands";
 
 export type { AppAction, KeybindingsManager } from "../../config/keybindings";
@@ -259,6 +260,13 @@ export interface ExtensionCommandContext extends ExtensionContext {
 
 	/** Compact the session context (interactive mode shows UI). */
 	compact(instructionsOrOptions?: string | CompactOptions): Promise<void>;
+
+	/** Start a new workflow with the given topic. */
+	startWorkflow(details: { topic: string; slug?: string }): Promise<void>;
+	/** Activate a specific workflow phase. */
+	activateWorkflowPhase(slug: string, phase: WorkflowPhase, phases?: WorkflowPhase[] | null): void;
+	/** Switch to a different workflow by slug. */
+	switchWorkflow(details: { slug: string; confirm?: boolean }): Promise<void>;
 }
 
 // ============================================================================
@@ -1288,6 +1296,11 @@ export interface ExtensionCommandContextActions {
 	compact: (instructionsOrOptions?: string | CompactOptions) => Promise<void>;
 	switchSession: (sessionPath: string) => Promise<{ cancelled: boolean }>;
 	reload: () => Promise<void>;
+
+	// Workflow actions (optional, only interactive mode)
+	startWorkflow?: (details: { topic: string; slug?: string }) => Promise<void>;
+	activateWorkflowPhase?: (slug: string, phase: WorkflowPhase, phases?: WorkflowPhase[] | null) => void;
+	switchWorkflow?: (details: { slug: string; confirm?: boolean }) => Promise<void>;
 }
 
 /** Full runtime = state + actions. */

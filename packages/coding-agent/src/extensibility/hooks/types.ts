@@ -23,6 +23,7 @@ import type {
 } from "../../session/session-manager";
 import type { BashToolDetails, FindToolDetails, GrepToolDetails, ReadToolDetails } from "../../tools";
 import type { TodoItem } from "../../tools/todo-write";
+import type { WorkflowPhase } from "../custom-commands/bundled/workflow/artifacts";
 
 // Re-export for backward compatibility
 export type { ExecOptions, ExecResult } from "../../exec/exec";
@@ -207,6 +208,13 @@ export interface HookCommandContext extends HookContext {
 	 * @returns Object with `cancelled: true` if a hook cancelled the navigation
 	 */
 	navigateTree(targetId: string, options?: { summarize?: boolean }): Promise<{ cancelled: boolean }>;
+
+	/** Start a new workflow with the given topic. */
+	startWorkflow(details: { topic: string; slug?: string }): Promise<void>;
+	/** Activate a specific workflow phase. */
+	activateWorkflowPhase(slug: string, phase: WorkflowPhase, phases?: WorkflowPhase[] | null): void;
+	/** Switch to a different workflow by slug. */
+	switchWorkflow(details: { slug: string; confirm?: boolean }): Promise<void>;
 }
 
 // ============================================================================

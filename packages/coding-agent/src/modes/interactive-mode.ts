@@ -12,10 +12,18 @@ import chalk from "chalk";
 import { KeybindingsManager } from "../config/keybindings";
 import { renderPromptTemplate } from "../config/prompt-templates";
 import { type SettingPath, type Settings, settings } from "../config/settings";
-import { type ApprovalContext, type ApprovalResult, runApprovalGate, runUserApproval } from "../extensibility/custom-commands/bundled/workflow/approval";
 import {
+	type ApprovalContext,
+	type ApprovalResult,
+	runApprovalGate,
+	runUserApproval,
+} from "../extensibility/custom-commands/bundled/workflow/approval";
+import {
+	createWorkflowState,
 	generateSlug,
 	readWorkflowState,
+	setActiveWorkflowSlug,
+	WORKFLOW_DIR,
 	type WorkflowPhase,
 	writeWorkflowArtifact,
 } from "../extensibility/custom-commands/bundled/workflow/artifacts";
@@ -833,7 +841,11 @@ export class InteractiveMode implements InteractiveModeContext {
 		await this.#handleFinalStageApproval(details, stageContent);
 	}
 
-	setActiveWorkflow(slug: string | null, phase: string | null, phases: string[] | null): void {
+	setActiveWorkflow(
+		slug: string | null,
+		phase: WorkflowPhase | string | null,
+		phases: WorkflowPhase[] | string[] | null,
+	): void {
 		this.#activeWorkflowSlug = slug;
 		this.#activeWorkflowPhase = phase;
 		this.#activeWorkflowPhases = phases;
@@ -845,8 +857,31 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	async handleStartWorkflowTool(details: { topic: string; slug?: string }): Promise<void> {
-		const slug = details.slug ?? generateSlug(details.topic);
-		const workflowDir = `docs/workflow/${slug}`;
+		const cwd = this.sessionManager.getCwd();
+		const recommendedSlug = details.slug ?? generateSlug(details.topic);
+
+		// Confirm or edit the slug name
+		const confirmedSlug = await this.showHookInput("Workflow slug (confirm or edit)", recommendedSlug);
+		if (!confirmedSlug) return;
+
+		const slug = confirmedSlug.trim();
+		if (!slug) return;
+
+		// Collision detection — check if a workflow already exists for this slug
+		const existing = await readWorkflowState(cwd, slug);
+		if (existing) {
+			const choice = await this.showHookSelector(`Workflow "${slug}" already exists. Overwrite?`, [
+				"Overwrite",
+				"Cancel",
+			]);
+			if (choice !== "Overwrite") return;
+		}
+
+		// Persist initial state
+		await createWorkflowState(cwd, slug);
+		await setActiveWorkflowSlug(cwd, slug);
+
+		const workflowDir = `${WORKFLOW_DIR}/${slug}`;
 
 		await this.session.abort();
 		await this.session.newSession({});
@@ -976,14 +1011,27 @@ export class InteractiveMode implements InteractiveModeContext {
 			// Track review rounds to enforce max iterations
 			const currentRound = (this.#reviewRoundCount.get(roundKey) ?? 0) + 1;
 			const maxRoundsStr = settings.get(`workflow.phases.${phase}.maxReviewRounds` as SettingPath) as string;
-			const maxRounds = (() => { const n = parseInt(maxRoundsStr, 10); return Number.isNaN(n) || n < 1 ? 3 : n; })();
+			const maxRounds = (() => {
+				const n = parseInt(maxRoundsStr, 10);
+				return Number.isNaN(n) || n < 1 ? 3 : n;
+			})();
 
 			if (currentRound >= maxRounds) {
 				// Max rounds reached — escalate to user approval
-				this.showWarning(`Maximum ${maxRounds} review round${maxRounds === 1 ? "" : "s"} reached. Escalating to user approval.`);
+				this.showWarning(
+					`Maximum ${maxRounds} review round${maxRounds === 1 ? "" : "s"} reached. Escalating to user approval.`,
+				);
 				const escalated = await runUserApproval(phase, approvalCtx);
 				this.#reviewRoundCount.delete(roundKey);
-				return this.#handleApprovalResult(slug, phase, phasePlanFilePath, content, approvedPhases, escalated, details);
+				return this.#handleApprovalResult(
+					slug,
+					phase,
+					phasePlanFilePath,
+					content,
+					approvedPhases,
+					escalated,
+					details,
+				);
 			}
 
 			this.#reviewRoundCount.set(roundKey, currentRound);

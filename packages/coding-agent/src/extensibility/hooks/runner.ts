@@ -5,6 +5,7 @@ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
 import type { Model } from "@oh-my-pi/pi-ai";
 import type { ModelRegistry } from "../../config/model-registry";
 import type { SessionManager } from "../../session/session-manager";
+import type { WorkflowPhase } from "../custom-commands/bundled/workflow/artifacts";
 import { createNoOpUIContext } from "../utils";
 import type {
 	AppendEntryHandler,
@@ -57,6 +58,10 @@ export class HookRunner {
 	#newSessionHandler: NewSessionHandler = async () => ({ cancelled: false });
 	#branchHandler: BranchHandler = async () => ({ cancelled: false });
 	#navigateTreeHandler: NavigateTreeHandler = async () => ({ cancelled: false });
+	#startWorkflowHandler: (details: { topic: string; slug?: string }) => Promise<void> = async () => {};
+	#activateWorkflowPhaseHandler: (slug: string, phase: WorkflowPhase, phases?: WorkflowPhase[] | null) => void =
+		() => {};
+	#switchWorkflowHandler: (details: { slug: string; confirm?: boolean }) => Promise<void> = async () => {};
 
 	constructor(
 		private readonly hooks: LoadedHook[],
@@ -97,6 +102,12 @@ export class HookRunner {
 		uiContext?: HookUIContext;
 		/** Whether UI is available */
 		hasUI?: boolean;
+		/** Handler for starting a workflow */
+		startWorkflowHandler?: (details: { topic: string; slug?: string }) => Promise<void>;
+		/** Handler for activating a workflow phase */
+		activateWorkflowPhaseHandler?: (slug: string, phase: WorkflowPhase, phases?: WorkflowPhase[] | null) => void;
+		/** Handler for switching workflows */
+		switchWorkflowHandler?: (details: { slug: string; confirm?: boolean }) => Promise<void>;
 	}): void {
 		this.#getModel = options.getModel;
 		this.#isIdleFn = options.isIdle ?? (() => true);
@@ -112,6 +123,15 @@ export class HookRunner {
 		}
 		if (options.navigateTreeHandler) {
 			this.#navigateTreeHandler = options.navigateTreeHandler;
+		}
+		if (options.startWorkflowHandler) {
+			this.#startWorkflowHandler = options.startWorkflowHandler;
+		}
+		if (options.activateWorkflowPhaseHandler) {
+			this.#activateWorkflowPhaseHandler = options.activateWorkflowPhaseHandler;
+		}
+		if (options.switchWorkflowHandler) {
+			this.#switchWorkflowHandler = options.switchWorkflowHandler;
 		}
 		// Set per-hook handlers for pi.sendMessage() and pi.appendEntry()
 		for (const hook of this.hooks) {
@@ -246,6 +266,9 @@ export class HookRunner {
 			newSession: options => this.#newSessionHandler(options),
 			branch: entryId => this.#branchHandler(entryId),
 			navigateTree: (targetId, options) => this.#navigateTreeHandler(targetId, options),
+			startWorkflow: details => this.#startWorkflowHandler(details),
+			activateWorkflowPhase: (slug, phase, phases) => this.#activateWorkflowPhaseHandler(slug, phase, phases),
+			switchWorkflow: details => this.#switchWorkflowHandler(details),
 		};
 	}
 

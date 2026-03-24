@@ -15,9 +15,9 @@ import {
 	readWorkflowState,
 	resolveWorkflowDir,
 	setActiveWorkflowSlug,
+	WORKFLOW_DIR,
 	type WorkflowPhase,
 	type WorkflowState,
-	WORKFLOW_DIR,
 	writeWorkflowArtifact,
 } from "./artifacts";
 import { createWorkflowConfigComponent } from "./config-component";
@@ -28,7 +28,6 @@ import finishPrompt from "./prompts/finish-start.md" with { type: "text" };
 import planPrompt from "./prompts/plan-start.md" with { type: "text" };
 import specPrompt from "./prompts/spec-start.md" with { type: "text" };
 import verifyPrompt from "./prompts/verify-start.md" with { type: "text" };
-
 
 export class WorkflowCommand implements CustomCommand {
 	name = "workflow";
@@ -252,7 +251,10 @@ export class WorkflowCommand implements CustomCommand {
 	async #switchWorkflow(rest: string[], ctx: HookCommandContext): Promise<string | undefined> {
 		const slugs = await listWorkflows(ctx.cwd);
 		if (slugs.length === 0) {
-			if (ctx.hasUI) { ctx.ui.notify("No workflows found.", "info"); return undefined; }
+			if (ctx.hasUI) {
+				ctx.ui.notify("No workflows found.", "info");
+				return undefined;
+			}
 			return "No workflows found.";
 		}
 
@@ -268,7 +270,10 @@ export class WorkflowCommand implements CustomCommand {
 	async #listWorkflows(ctx: HookCommandContext): Promise<string | undefined> {
 		const slugs = await listWorkflows(ctx.cwd);
 		if (slugs.length === 0) {
-			if (ctx.hasUI) { ctx.ui.notify("No workflows found.", "info"); return undefined; }
+			if (ctx.hasUI) {
+				ctx.ui.notify("No workflows found.", "info");
+				return undefined;
+			}
 			return "No workflows found.";
 		}
 
