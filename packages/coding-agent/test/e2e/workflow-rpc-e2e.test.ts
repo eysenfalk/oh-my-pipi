@@ -157,7 +157,11 @@ describe.skipIf(!API_KEY)("Workflow RPC E2E (MiniMax M2.7)", () => {
 
 	test("brainstorm phase creates workflow state and artifact", async () => {
 		await client.start();
-		const removeHandler = attachExtensionUIHandler(client, createAutoApproveHandler());
+		const uiRequests: RpcExtensionUIRequest[] = [];
+		const removeHandler = attachExtensionUIHandler(client, request => {
+			uiRequests.push(request);
+			return createAutoApproveHandler()(request);
+		});
 
 		// Start brainstorm — triggers startWorkflow hook via onInputCallback
 		const eventsPromise = collectUntilIdle(client, 240_000);
@@ -168,6 +172,14 @@ describe.skipIf(!API_KEY)("Workflow RPC E2E (MiniMax M2.7)", () => {
 
 		// Agent turn started
 		expect(events.some(e => e.type === "agent_start")).toBe(true);
+
+		// Slug confirmation dialog was shown
+		const slugInput = uiRequests.find(r => r.method === "input");
+		expect(slugInput).toBeDefined();
+		// Placeholder should contain the recommended slug (date-prefixed sanitized topic)
+		const placeholder = (slugInput as { placeholder?: string }).placeholder;
+		expect(placeholder).toBeDefined();
+		expect(placeholder!).toMatch(/^\d{4}-\d{2}-\d{2}-simple-calculator/);
 
 		// Workflow state was created
 		const workflowDir = path.join(workDir, "docs", "workflow");
@@ -189,9 +201,23 @@ describe.skipIf(!API_KEY)("Workflow RPC E2E (MiniMax M2.7)", () => {
 
 		const state = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
 		expect(state.slug).toBe(slug);
-		// After brainstorm completes and approval, artifact should exist
+
+		// After brainstorm completes, approval gate fires, artifact is persisted
 		expect(state.artifacts?.brainstorm).toBeDefined();
 		expect(fs.existsSync(path.join(workflowDir, slug, "brainstorm.md"))).toBe(true);
+
+		// Approval selector was shown (Approve/Refine/Reject)
+		const approvalSelect = uiRequests.find(
+			r => r.method === "select" && (r.options as string[] | undefined)?.includes("Approve"),
+		);
+		expect(approvalSelect).toBeDefined();
+
+		// "Continue to next phase?" selector was shown after approval
+		const continueSelect = uiRequests.find(
+			r => r.method === "select" && (r.options as string[] | undefined)?.includes("Continue"),
+		);
+		expect(continueSelect).toBeDefined();
+		expect((continueSelect as { options: string[] }).options.includes("Stop here")).toBe(true);
 	}, 240_000);
 
 	// -----------------------------------------------------------------------
