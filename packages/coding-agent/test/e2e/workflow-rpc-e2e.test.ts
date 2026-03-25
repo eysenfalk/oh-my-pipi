@@ -109,6 +109,63 @@ async function collectNotifications(client: RpcClient, durationMs = 3000): Promi
 const API_KEY = e2eApiKey("MINIMAX_CODE_API_KEY");
 const CLI_PATH = path.join(import.meta.dir, "..", "..", "src", "cli.ts");
 
+// ---------------------------------------------------------------------------
+// Workflow seeding helper
+// ---------------------------------------------------------------------------
+
+function seedWorkflow(workDir: string, slug: string, completedPhases: string[]): void {
+	const wfDir = path.join(workDir, "docs", "workflow", slug);
+	fs.mkdirSync(wfDir, { recursive: true });
+	const artifacts: Record<string, string> = {};
+	for (const phase of completedPhases) {
+		const artifactPath = `docs/workflow/${slug}/${phase}.md`;
+		artifacts[phase] = artifactPath;
+		fs.writeFileSync(
+			path.join(wfDir, `${phase}.md`),
+			`# ${phase}\nTest artifact for ${phase} phase.\nThis is a simple calculator app.`,
+		);
+	}
+	fs.writeFileSync(
+		path.join(wfDir, "state.json"),
+		JSON.stringify({
+			slug,
+			currentPhase: completedPhases[completedPhases.length - 1] ?? "brainstorm",
+			artifacts,
+		}),
+	);
+	fs.writeFileSync(path.join(workDir, "docs", "workflow", ".active"), slug);
+}
+
+/**
+ * After an agent turn completes, check if the approval dialog appeared.
+ * If not (MiniMax M2.7 sometimes doesn't call exit_plan_mode), send a follow-up
+ * nudge telling the agent to call the tool, and wait for the next turn.
+ */
+async function nudgeIfNoApproval(
+	client: RpcClient,
+	uiRequests: RpcExtensionUIRequest[],
+	phase: string,
+	slug: string,
+	maxAttempts = 3,
+	timeoutMs = 120_000,
+): Promise<void> {
+	for (let attempt = 0; attempt < maxAttempts; attempt++) {
+		const hasApproval = uiRequests.some(
+			r => r.method === "select" && (r.options as string[] | undefined)?.includes("Approve"),
+		);
+		if (hasApproval) break;
+		if (attempt === maxAttempts - 1) break; // Don't nudge on last check
+		const eventsPromise = collectUntilIdle(client, timeoutMs);
+		client.prompt(
+			`You MUST now call the exit_plan_mode tool to complete the ${phase} phase. ` +
+				`Write your output to local://${phase.toUpperCase()}.md first, then call exit_plan_mode ` +
+				`with title: ${phase.toUpperCase()}, workflowSlug: ${slug}, workflowPhase: ${phase}.`,
+		);
+		await eventsPromise;
+		await Bun.sleep(5000); // Wait for async approval gate + artifact write
+	}
+}
+
 describe.skipIf(!API_KEY)("Workflow RPC E2E (MiniMax M2.7)", () => {
 	let client: RpcClient;
 	let sessionDir: string;
@@ -163,28 +220,16 @@ describe.skipIf(!API_KEY)("Workflow RPC E2E (MiniMax M2.7)", () => {
 			return createAutoApproveHandler()(request);
 		});
 
-		// Start brainstorm — triggers startWorkflow hook via onInputCallback
+		// Start brainstorm
 		const eventsPromise = collectUntilIdle(client, 240_000);
 		client.prompt("/workflow brainstorm simple calculator app");
-
 		const events = await eventsPromise;
-		removeHandler();
-
-		// Agent turn started
+		await Bun.sleep(5000); // Wait for async approval gate + artifact write
 		expect(events.some(e => e.type === "agent_start")).toBe(true);
 
-		// Slug confirmation dialog was shown
-		const slugInput = uiRequests.find(r => r.method === "input");
-		expect(slugInput).toBeDefined();
-		// Placeholder should contain the recommended slug (date-prefixed sanitized topic)
-		const placeholder = (slugInput as { placeholder?: string }).placeholder;
-		expect(placeholder).toBeDefined();
-		expect(placeholder!).toMatch(/^\d{4}-\d{2}-\d{2}-simple-calculator/);
-
-		// Workflow state was created
+		// Detect slug from filesystem
 		const workflowDir = path.join(workDir, "docs", "workflow");
 		expect(fs.existsSync(workflowDir)).toBe(true);
-
 		const slugDirs = fs.readdirSync(workflowDir).filter(f => {
 			try {
 				return fs.statSync(path.join(workflowDir, f)).isDirectory();
@@ -193,32 +238,35 @@ describe.skipIf(!API_KEY)("Workflow RPC E2E (MiniMax M2.7)", () => {
 			}
 		});
 		expect(slugDirs.length).toBe(1);
-
 		const slug = slugDirs[0]!;
 		expect(slug).toMatch(/^\d{4}-\d{2}-\d{2}-/);
-		const stateFile = path.join(workflowDir, slug, "state.json");
-		expect(fs.existsSync(stateFile)).toBe(true);
 
+		// Nudge if model didn't call exit_plan_mode
+		await nudgeIfNoApproval(client, uiRequests, "brainstorm", slug);
+
+		// Slug confirmation dialog was shown with recommended name
+		const slugInput = uiRequests.find(r => r.method === "input");
+		expect(slugInput).toBeDefined();
+		const placeholder = (slugInput as { placeholder?: string }).placeholder;
+		expect(placeholder).toBeDefined();
+		expect(placeholder!).toMatch(/^\d{4}-\d{2}-\d{2}-simple-calculator/);
+
+		// Artifact persisted after approval
+		const stateFile = path.join(workflowDir, slug, "state.json");
 		const state = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
 		expect(state.slug).toBe(slug);
-
-		// After brainstorm completes, approval gate fires, artifact is persisted
 		expect(state.artifacts?.brainstorm).toBeDefined();
 		expect(fs.existsSync(path.join(workflowDir, slug, "brainstorm.md"))).toBe(true);
 
-		// Approval selector was shown (Approve/Refine/Reject)
-		const approvalSelect = uiRequests.find(
-			r => r.method === "select" && (r.options as string[] | undefined)?.includes("Approve"),
-		);
-		expect(approvalSelect).toBeDefined();
-
-		// "Continue to next phase?" selector was shown after approval
-		const continueSelect = uiRequests.find(
-			r => r.method === "select" && (r.options as string[] | undefined)?.includes("Continue"),
-		);
-		expect(continueSelect).toBeDefined();
-		expect((continueSelect as { options: string[] }).options.includes("Stop here")).toBe(true);
-	}, 240_000);
+		// Approval + continue dialogs shown
+		expect(
+			uiRequests.some(r => r.method === "select" && (r.options as string[] | undefined)?.includes("Approve")),
+		).toBe(true);
+		expect(
+			uiRequests.some(r => r.method === "select" && (r.options as string[] | undefined)?.includes("Continue")),
+		).toBe(true);
+		removeHandler();
+	}, 480_000);
 
 	// -----------------------------------------------------------------------
 	// Phase execution: spec (uses prompt return, not startWorkflow hook)
@@ -256,6 +304,180 @@ describe.skipIf(!API_KEY)("Workflow RPC E2E (MiniMax M2.7)", () => {
 		const hasToolUse = events.some(e => e.type === "tool_execution_start" || e.type === "message_start");
 		expect(hasToolUse).toBe(true);
 	}, 600_000);
+
+	// -----------------------------------------------------------------------
+	// Phase execution: spec (full — artifact + approval assertions)
+	// -----------------------------------------------------------------------
+
+	test("spec phase creates artifact and shows approval dialog", async () => {
+		await client.start();
+		const uiRequests: RpcExtensionUIRequest[] = [];
+		const removeHandler = attachExtensionUIHandler(client, request => {
+			uiRequests.push(request);
+			return createAutoApproveHandler()(request);
+		});
+		const slug = "test-spec-full-slug";
+		seedWorkflow(workDir, slug, ["brainstorm"]);
+
+		const eventsPromise = collectUntilIdle(client, 600_000);
+		client.prompt(`/workflow spec ${slug}`);
+		const events = await eventsPromise;
+		expect(events.some(e => e.type === "agent_start")).toBe(true);
+
+		await nudgeIfNoApproval(client, uiRequests, "spec", slug);
+
+		const wfDir = path.join(workDir, "docs", "workflow", slug);
+		const state = JSON.parse(fs.readFileSync(path.join(wfDir, "state.json"), "utf-8"));
+		expect(state.artifacts?.spec).toBeDefined();
+		expect(fs.existsSync(path.join(wfDir, "spec.md"))).toBe(true);
+		expect(uiRequests.some(r => r.method === "select" && (r.options as string[])?.includes("Approve"))).toBe(true);
+		expect(uiRequests.some(r => r.method === "select" && (r.options as string[])?.includes("Continue"))).toBe(true);
+		removeHandler();
+	}, 900_000);
+
+	// -----------------------------------------------------------------------
+	// Phase execution: design
+	// -----------------------------------------------------------------------
+
+	test("design phase creates artifact and shows approval dialog", async () => {
+		await client.start();
+		const uiRequests: RpcExtensionUIRequest[] = [];
+		const removeHandler = attachExtensionUIHandler(client, request => {
+			uiRequests.push(request);
+			return createAutoApproveHandler()(request);
+		});
+		const slug = "test-design-slug";
+		seedWorkflow(workDir, slug, ["brainstorm", "spec"]);
+
+		const eventsPromise = collectUntilIdle(client, 600_000);
+		client.prompt(`/workflow design ${slug}`);
+		const events = await eventsPromise;
+		expect(events.some(e => e.type === "agent_start")).toBe(true);
+
+		await nudgeIfNoApproval(client, uiRequests, "design", slug);
+
+		const wfDir = path.join(workDir, "docs", "workflow", slug);
+		const state = JSON.parse(fs.readFileSync(path.join(wfDir, "state.json"), "utf-8"));
+		expect(state.artifacts?.design).toBeDefined();
+		expect(fs.existsSync(path.join(wfDir, "design.md"))).toBe(true);
+		expect(uiRequests.some(r => r.method === "select" && (r.options as string[])?.includes("Approve"))).toBe(true);
+		expect(uiRequests.some(r => r.method === "select" && (r.options as string[])?.includes("Continue"))).toBe(true);
+		removeHandler();
+	}, 900_000);
+
+	// -----------------------------------------------------------------------
+	// Phase execution: plan
+	// -----------------------------------------------------------------------
+
+	test("plan phase creates artifact and shows approval dialog", async () => {
+		await client.start();
+		const uiRequests: RpcExtensionUIRequest[] = [];
+		const removeHandler = attachExtensionUIHandler(client, request => {
+			uiRequests.push(request);
+			return createAutoApproveHandler()(request);
+		});
+		const slug = "test-plan-slug";
+		seedWorkflow(workDir, slug, ["brainstorm", "spec", "design"]);
+
+		const eventsPromise = collectUntilIdle(client, 600_000);
+		client.prompt(`/workflow plan ${slug}`);
+		const events = await eventsPromise;
+		expect(events.some(e => e.type === "agent_start")).toBe(true);
+
+		await nudgeIfNoApproval(client, uiRequests, "plan", slug);
+
+		const wfDir = path.join(workDir, "docs", "workflow", slug);
+		const state = JSON.parse(fs.readFileSync(path.join(wfDir, "state.json"), "utf-8"));
+		expect(state.artifacts?.plan).toBeDefined();
+		expect(fs.existsSync(path.join(wfDir, "plan.md"))).toBe(true);
+		expect(uiRequests.some(r => r.method === "select" && (r.options as string[])?.includes("Approve"))).toBe(true);
+		expect(uiRequests.some(r => r.method === "select" && (r.options as string[])?.includes("Continue"))).toBe(true);
+		removeHandler();
+	}, 900_000);
+
+	// -----------------------------------------------------------------------
+	// Phase execution: execute (full tool access, file modifications expected)
+	// -----------------------------------------------------------------------
+
+	test("execute phase runs with full tool access and creates artifact", async () => {
+		await client.start();
+		const uiRequests: RpcExtensionUIRequest[] = [];
+		const removeHandler = attachExtensionUIHandler(client, request => {
+			uiRequests.push(request);
+			return createAutoApproveHandler()(request);
+		});
+		const slug = "test-execute-slug";
+		seedWorkflow(workDir, slug, ["brainstorm", "spec", "design", "plan"]);
+
+		const eventsPromise = collectUntilIdle(client, 600_000);
+		client.prompt(`/workflow execute ${slug}`);
+		const events = await eventsPromise;
+		expect(events.some(e => e.type === "agent_start")).toBe(true);
+
+		await nudgeIfNoApproval(client, uiRequests, "execute", slug);
+
+		const wfDir = path.join(workDir, "docs", "workflow", slug);
+		const state = JSON.parse(fs.readFileSync(path.join(wfDir, "state.json"), "utf-8"));
+		expect(state.artifacts?.execute).toBeDefined();
+		expect(fs.existsSync(path.join(wfDir, "execute.md"))).toBe(true);
+		removeHandler();
+	}, 900_000);
+
+	// -----------------------------------------------------------------------
+	// Phase execution: verify
+	// -----------------------------------------------------------------------
+
+	test("verify phase creates artifact", async () => {
+		await client.start();
+		const uiRequests: RpcExtensionUIRequest[] = [];
+		const removeHandler = attachExtensionUIHandler(client, request => {
+			uiRequests.push(request);
+			return createAutoApproveHandler()(request);
+		});
+		const slug = "test-verify-slug";
+		seedWorkflow(workDir, slug, ["brainstorm", "spec", "design", "plan", "execute"]);
+
+		const eventsPromise = collectUntilIdle(client, 600_000);
+		client.prompt(`/workflow verify ${slug}`);
+		const events = await eventsPromise;
+		expect(events.some(e => e.type === "agent_start")).toBe(true);
+
+		await nudgeIfNoApproval(client, uiRequests, "verify", slug);
+
+		const wfDir = path.join(workDir, "docs", "workflow", slug);
+		const state = JSON.parse(fs.readFileSync(path.join(wfDir, "state.json"), "utf-8"));
+		expect(state.artifacts?.verify).toBeDefined();
+		expect(fs.existsSync(path.join(wfDir, "verify.md"))).toBe(true);
+		removeHandler();
+	}, 900_000);
+
+	// -----------------------------------------------------------------------
+	// Phase execution: finish
+	// -----------------------------------------------------------------------
+
+	test("finish phase creates artifact and completes workflow", async () => {
+		await client.start();
+		const uiRequests: RpcExtensionUIRequest[] = [];
+		const removeHandler = attachExtensionUIHandler(client, request => {
+			uiRequests.push(request);
+			return createAutoApproveHandler()(request);
+		});
+		const slug = "test-finish-slug";
+		seedWorkflow(workDir, slug, ["brainstorm", "spec", "design", "plan", "execute", "verify"]);
+
+		const eventsPromise = collectUntilIdle(client, 600_000);
+		client.prompt(`/workflow finish ${slug}`);
+		const events = await eventsPromise;
+		expect(events.some(e => e.type === "agent_start")).toBe(true);
+
+		await nudgeIfNoApproval(client, uiRequests, "finish", slug);
+
+		const wfDir = path.join(workDir, "docs", "workflow", slug);
+		const state = JSON.parse(fs.readFileSync(path.join(wfDir, "state.json"), "utf-8"));
+		expect(state.artifacts?.finish).toBeDefined();
+		expect(fs.existsSync(path.join(wfDir, "finish.md"))).toBe(true);
+		removeHandler();
+	}, 900_000);
 
 	// -----------------------------------------------------------------------
 	// Prerequisite enforcement
@@ -360,4 +582,114 @@ describe.skipIf(!API_KEY)("Workflow RPC E2E (MiniMax M2.7)", () => {
 		// Workflow directory should be gone after delete
 		expect(fs.existsSync(wfDir)).toBe(false);
 	}, 15_000);
+
+	// -----------------------------------------------------------------------
+	// Multi-phase flow tests
+	// -----------------------------------------------------------------------
+
+	test("brainstorm → spec multi-phase flow", async () => {
+		await client.start();
+
+		const uiRequests: RpcExtensionUIRequest[] = [];
+		const removeHandler = attachExtensionUIHandler(client, request => {
+			uiRequests.push(request);
+			return createAutoApproveHandler()(request);
+		});
+
+		// Phase 1: brainstorm — uses startWorkflow hook
+		const brainstormEventsPromise = collectUntilIdle(client, 300_000);
+		client.prompt("/workflow brainstorm simple calculator app");
+		const brainstormEvents = await brainstormEventsPromise;
+
+		expect(brainstormEvents.some(e => e.type === "agent_start")).toBe(true);
+		expect(brainstormEvents.some(e => e.type === "agent_end")).toBe(true);
+
+		// Detect slug created by brainstorm
+		const wfDir = path.join(workDir, "docs", "workflow");
+		const slugDirs = fs.readdirSync(wfDir).filter(f => {
+			try {
+				return fs.statSync(path.join(wfDir, f)).isDirectory();
+			} catch {
+				return false;
+			}
+		});
+		expect(slugDirs.length).toBe(1);
+		const slug = slugDirs[0]!;
+
+		// Phase 2: spec — auto-approve handler already attached, send command manually
+		const specEventsPromise = collectUntilIdle(client, 600_000);
+		client.prompt(`/workflow spec ${slug}`);
+		const specEvents = await specEventsPromise;
+
+		removeHandler();
+
+		expect(specEvents.some(e => e.type === "agent_start")).toBe(true);
+		expect(specEvents.some(e => e.type === "agent_end")).toBe(true);
+
+		// Both artifacts must exist on disk
+		expect(fs.existsSync(path.join(wfDir, slug, "brainstorm.md"))).toBe(true);
+		expect(fs.existsSync(path.join(wfDir, slug, "spec.md"))).toBe(true);
+
+		// state.json must record both artifacts
+		const state = JSON.parse(fs.readFileSync(path.join(wfDir, slug, "state.json"), "utf-8"));
+		expect(state.artifacts?.brainstorm).toBeDefined();
+		expect(state.artifacts?.spec).toBeDefined();
+
+		// Approval selector must have fired for both pre-implementation phases
+		const approvalSelects = uiRequests.filter(
+			r => r.method === "select" && (r.options as string[] | undefined)?.includes("Approve"),
+		);
+		expect(approvalSelects.length).toBeGreaterThanOrEqual(2);
+	}, 900_000);
+
+	test("full 7-phase pipeline", async () => {
+		await client.start();
+
+		const removeHandler = attachExtensionUIHandler(client, createAutoApproveHandler());
+
+		const phases = ["brainstorm", "spec", "design", "plan", "execute", "verify", "finish"] as const;
+
+		// Phase 1: brainstorm — uses startWorkflow hook
+		const brainstormEventsPromise = collectUntilIdle(client, 300_000);
+		client.prompt("/workflow brainstorm simple calculator app");
+		const brainstormEvents = await brainstormEventsPromise;
+
+		expect(brainstormEvents.some(e => e.type === "agent_start")).toBe(true);
+		expect(brainstormEvents.some(e => e.type === "agent_end")).toBe(true);
+
+		// Detect slug created by brainstorm
+		const wfDir = path.join(workDir, "docs", "workflow");
+		const slugDirs = fs.readdirSync(wfDir).filter(f => {
+			try {
+				return fs.statSync(path.join(wfDir, f)).isDirectory();
+			} catch {
+				return false;
+			}
+		});
+		expect(slugDirs.length).toBe(1);
+		const slug = slugDirs[0]!;
+
+		// Phases 2–7: send each command after the prior one's agent turn completes
+		for (const phase of phases.slice(1)) {
+			const phaseEventsPromise = collectUntilIdle(client, 600_000);
+			client.prompt(`/workflow ${phase} ${slug}`);
+			const phaseEvents = await phaseEventsPromise;
+			expect(phaseEvents.some(e => e.type === "agent_start")).toBe(true);
+			expect(phaseEvents.some(e => e.type === "agent_end")).toBe(true);
+		}
+
+		removeHandler();
+
+		// All 7 artifact files must exist
+		for (const phase of phases) {
+			expect(fs.existsSync(path.join(wfDir, slug, `${phase}.md`))).toBe(true);
+		}
+
+		// state.json must record all artifacts and reflect the final phase
+		const state = JSON.parse(fs.readFileSync(path.join(wfDir, slug, "state.json"), "utf-8"));
+		expect(state.currentPhase).toBe("finish");
+		for (const phase of phases) {
+			expect(state.artifacts?.[phase]).toBeDefined();
+		}
+	}, 3_600_000);
 });

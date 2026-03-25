@@ -22,7 +22,7 @@ export class HookInputComponent extends Container {
 
 	constructor(
 		title: string,
-		placeholder: string | undefined,
+		_placeholder: string | undefined,
 		onSubmit: (value: string) => void,
 		onCancel: () => void,
 		opts?: HookInputOptions,
