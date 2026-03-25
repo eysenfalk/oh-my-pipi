@@ -54,6 +54,7 @@ describe.skipIf(!MINIMAX_API_KEY)("RPC multi-phase flow", () => {
 		const specResult = await runPhaseTurn(env.client, `/workflow spec ${slug}`, uiRequests, "spec", slug);
 		expect(specResult.calledExitPlanMode).toBe(true);
 		expect(specResult.approvalShown).toBe(true);
+		expect(specResult.continueShown).toBe(true);
 
 		// Both artifacts on disk
 		expect(artifactExists(env.workDir, slug, "brainstorm")).toBe(true);

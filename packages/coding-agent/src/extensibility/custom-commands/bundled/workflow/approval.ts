@@ -91,7 +91,7 @@ function buildAgentThenUserPrompt(phase: WorkflowPhase, reviewAgent: ReviewAgent
 	].join("\n");
 }
 
-function parseMaxRounds(value: string): number {
+export function parseMaxRounds(value: string): number {
 	const parsed = parseInt(value, 10);
 	return Number.isNaN(parsed) || parsed < 1 ? 3 : parsed;
 }

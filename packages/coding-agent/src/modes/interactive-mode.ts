@@ -15,6 +15,7 @@ import { type SettingPath, type Settings, settings } from "../config/settings";
 import {
 	type ApprovalContext,
 	type ApprovalResult,
+	parseMaxRounds,
 	runApprovalGate,
 	runUserApproval,
 } from "../extensibility/custom-commands/bundled/workflow/approval";
@@ -1017,10 +1018,7 @@ export class InteractiveMode implements InteractiveModeContext {
 			// Track review rounds to enforce max iterations
 			const currentRound = (this.#reviewRoundCount.get(roundKey) ?? 0) + 1;
 			const maxRoundsStr = settings.get(`workflow.phases.${phase}.maxReviewRounds` as SettingPath) as string;
-			const maxRounds = (() => {
-				const n = parseInt(maxRoundsStr, 10);
-				return Number.isNaN(n) || n < 1 ? 3 : n;
-			})();
+			const maxRounds = parseMaxRounds(maxRoundsStr);
 
 			if (currentRound >= maxRounds) {
 				// Max rounds reached — escalate to user approval

@@ -13,6 +13,7 @@ import type { SettingPath } from "../../config/settings-schema";
 import {
 	type ApprovalContext,
 	type ApprovalResult,
+	parseMaxRounds,
 	runApprovalGate,
 	runUserApproval,
 } from "../../extensibility/custom-commands/bundled/workflow/approval";
@@ -79,9 +80,11 @@ export class RpcWorkflowHandler {
 			switch (event.toolName) {
 				case "exit_plan_mode": {
 					const d = details as ExitPlanModeDetails;
-					if (d.workflowSlug && d.workflowPhase) {
+					const workflowSlug = d.workflowSlug || this.#activeWorkflowSlug;
+					const workflowPhase = d.workflowPhase || this.#activeWorkflowPhase;
+					if (workflowSlug && workflowPhase) {
 						await this.#session.abort();
-						await this.#handleWorkflowPhaseComplete(d.workflowSlug, d.workflowPhase as WorkflowPhase, d);
+						await this.#handleWorkflowPhaseComplete(workflowSlug, workflowPhase as WorkflowPhase, d);
 					}
 					break;
 				}
@@ -261,10 +264,7 @@ export class RpcWorkflowHandler {
 			// Track review rounds to enforce max iterations
 			const currentRound = (this.#reviewRoundCount.get(roundKey) ?? 0) + 1;
 			const maxRoundsStr = settings.get(`workflow.phases.${phase}.maxReviewRounds` as SettingPath) as string;
-			const maxRounds = (() => {
-				const n = parseInt(maxRoundsStr, 10);
-				return Number.isNaN(n) || n < 1 ? 3 : n;
-			})();
+			const maxRounds = parseMaxRounds(maxRoundsStr);
 
 			if (currentRound >= maxRounds) {
 				this.#uiContext.notify(
