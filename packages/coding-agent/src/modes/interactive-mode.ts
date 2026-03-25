@@ -868,9 +868,9 @@ export class InteractiveMode implements InteractiveModeContext {
 
 		// Confirm or edit the slug name
 		const confirmedSlug = await this.showHookInput("Workflow slug (confirm or edit)", recommendedSlug);
-		if (!confirmedSlug) return;
-
-		const slug = confirmedSlug.trim();
+		// Empty input or cancel → use recommended slug. Cancel (Escape) returns undefined.
+		if (confirmedSlug === undefined) return;
+		const slug = (confirmedSlug.trim() || recommendedSlug).trim();
 		if (!slug) return;
 
 		// Collision detection — check if a workflow already exists for this slug

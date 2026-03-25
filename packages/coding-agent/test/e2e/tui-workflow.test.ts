@@ -343,6 +343,30 @@ describe("HookInputComponent (TUI)", () => {
 		expect(result).toBe("");
 	});
 
+	test("submits empty string when placeholder provided but user types nothing", async () => {
+		env = await createTUITestEnv();
+		const { promise, resolve } = Promise.withResolvers<string | undefined>();
+
+		const input = new HookInputComponent(
+			"Workflow slug (confirm or edit)",
+			"2026-03-25-my-cool-feature",
+			value => resolve(value),
+			() => resolve(undefined),
+		);
+
+		env.root.addChild(input);
+		env.tui.setFocus(input);
+		env.tui.requestRender();
+
+		// User presses Enter without typing -- placeholder is NOT pre-filled,
+		// so the submitted value is empty string. The caller (handleStartWorkflowTool)
+		// is responsible for falling back to the recommended slug.
+		await env.press(ENTER);
+
+		const result = await promise;
+		expect(result).toBe("");
+	});
+
 	test("renders title in viewport", async () => {
 		env = await createTUITestEnv();
 		const { resolve } = Promise.withResolvers<string | undefined>();

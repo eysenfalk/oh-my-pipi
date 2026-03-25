@@ -11,6 +11,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
 	createWorkflowState,
+	listWorkflows,
 	readWorkflowState,
 	writeWorkflowArtifact,
 } from "@oh-my-pi/pi-coding-agent/extensibility/custom-commands/bundled/workflow/artifacts";
@@ -551,16 +552,17 @@ describe("InteractiveMode workflow orchestration", () => {
 			expect(harness.captures.submissions[0]!.text).toContain("my-feature-slug");
 		});
 
-		it("empty slug input — returns without creating state", async () => {
+		it("empty slug input — falls back to recommended slug", async () => {
 			harness = await makeHarness();
 
-			harness.queueInputResponse(""); // empty → trim → falsy
+			harness.queueInputResponse(""); // empty → falls back to recommendedSlug
 
 			await harness.handleStartWorkflowTool({ topic: "Some feature", slug: "some-feature" });
 
+			// Workflow should have been created with the recommended slug ("some-feature")
 			const state = await readWorkflowState(harness.cwd, "some-feature");
-			expect(state).toBeNull();
-			expect(harness.captures.submissions).toHaveLength(0);
+			expect(state).not.toBeNull();
+			expect(state!.slug).toBe("some-feature");
 		});
 
 		it("cancelled slug input (undefined) — returns without creating state", async () => {
@@ -832,6 +834,36 @@ describe("InteractiveMode workflow orchestration", () => {
 			expect(inputCall.placeholder).toBeDefined();
 			// Placeholder should contain a date-prefixed sanitized version of the topic
 			expect(inputCall.placeholder).toMatch(/^\d{4}-\d{2}-\d{2}-my-cool-feature/);
+		});
+
+		it("handleStartWorkflowTool uses recommended slug when user submits empty input", async () => {
+			harness = await makeHarness();
+
+			// Queue empty string (user pressed Enter without typing in the slug field)
+			harness.queueInputResponse("");
+			await harness.handleStartWorkflowTool({ topic: "My Cool Feature" });
+
+			// Should have created the workflow with the recommended slug, not failed silently
+			const inputCall = harness.captures.inputCalls[0]!;
+			const recommendedSlug = inputCall.placeholder!;
+
+			// Workflow state should exist with the recommended slug
+			const state = await readWorkflowState(harness.cwd, recommendedSlug);
+			expect(state).not.toBeNull();
+			expect(state!.slug).toBe(recommendedSlug);
+			expect(state!.currentPhase).toBe("brainstorm");
+		});
+
+		it("handleStartWorkflowTool returns silently when user cancels slug input", async () => {
+			harness = await makeHarness();
+
+			// Queue undefined (user pressed Escape)
+			harness.queueInputResponse(undefined);
+			await harness.handleStartWorkflowTool({ topic: "My Feature" });
+
+			// No workflow should have been created
+			const workflows = await listWorkflows(harness.cwd);
+			expect(workflows).toHaveLength(0);
 		});
 
 		it("exit_plan_mode falls back to active workflow when agent omits params", async () => {
