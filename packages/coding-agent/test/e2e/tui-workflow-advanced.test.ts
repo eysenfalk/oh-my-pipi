@@ -837,7 +837,7 @@ describe("WorkflowConfigComponent (TUI)", () => {
 		await env.press(ENTER);
 
 		const screen = await env.screen();
-		// Override marker should appear: "Approval *"
-		expect(screen).toContain("*");
+		// Override marker must appear adjacent to the Approval label, not just anywhere on screen
+		expect(screen).toContain("Approval *");
 	});
 });

@@ -65,7 +65,7 @@ describe("Workflow E2E — WorkflowCommand", () => {
 			await cmd.execute(["unknown-command"], asCtx(ctx));
 			// #showHelp calls notify with help text
 			const notifications = getNotifications(ctx);
-			expect(notifications.some(n => n.type === "info")).toBe(true);
+			expect(notifications.some(n => n.type === "info" && n.message.includes("/workflow"))).toBe(true);
 		});
 
 		test("brainstorm without topic prompts for input", async () => {
@@ -136,8 +136,7 @@ describe("Workflow E2E — WorkflowCommand", () => {
 			expect(sessions.length).toBe(1);
 
 			// Should return a prompt string
-			expect(typeof result).toBe("string");
-			expect((result as string).length).toBeGreaterThan(0);
+			expect(result as string).toContain("docs/workflow/2024-01-01-test-prereqs/brainstorm.md");
 		});
 
 		test("design blocks when spec artifact missing", async () => {
@@ -160,7 +159,9 @@ describe("Workflow E2E — WorkflowCommand", () => {
 
 			const notifications = getNotifications(ctx);
 			// Should block — either on spec or design depending on prereq chain
-			expect(notifications.some(n => n.type === "error")).toBe(true);
+			expect(
+				notifications.some(n => n.type === "error" && (n.message.includes("spec") || n.message.includes("design"))),
+			).toBe(true);
 			expect(getActions(ctx, "activateWorkflowPhase").length).toBe(0);
 		});
 
@@ -249,6 +250,7 @@ describe("Workflow E2E — WorkflowCommand", () => {
 			expect(prompt).toContain("docs/workflow/2024-01-01-test-phases/brainstorm.md");
 
 			// Should activate design phase and start new session
+			expect(getActions(ctx, "activateWorkflowPhase").length).toBeGreaterThanOrEqual(1);
 			expect(getActions(ctx, "activateWorkflowPhase")[0].args[1]).toBe("design");
 			expect(getActions(ctx, "newSession").length).toBe(1);
 		});
@@ -272,7 +274,7 @@ describe("Workflow E2E — WorkflowCommand", () => {
 				const activations = getActions(freshCtx, "activateWorkflowPhase");
 				expect(activations.length).toBe(1);
 				expect(activations[0].args[1]).toBe(phase);
-				expect(typeof result).toBe("string");
+				expect(result as string).toContain("2024-01-01-test-phases");
 			}
 		});
 	});
@@ -467,7 +469,7 @@ describe("Workflow E2E — WorkflowCommand", () => {
 			const activations = getActions(ctx, "activateWorkflowPhase");
 			expect(activations.length).toBe(1);
 			expect(activations[0].args[1]).toBe("spec");
-			expect(typeof result).toBe("string");
+			expect(result as string).toContain("docs/workflow/2024-01-01-test-resume/brainstorm.md");
 		});
 
 		test("resume with all phases complete shows completion message", async () => {
@@ -605,8 +607,9 @@ describe("Workflow E2E — WorkflowCommand", () => {
 			// Phase 2: spec — needs brainstorm
 			const specCtx = new MockHookCommandContext(tempDir);
 			const specResult = await cmd.execute(["spec", slug], asCtx(specCtx));
+			expect(getActions(specCtx, "activateWorkflowPhase").length).toBeGreaterThanOrEqual(1);
 			expect(getActions(specCtx, "activateWorkflowPhase")[0].args[1]).toBe("spec");
-			expect(typeof specResult).toBe("string");
+			expect(specResult as string).toContain("docs/workflow/2024-01-01-full-pipeline/brainstorm.md");
 
 			// Simulate spec completion
 			await writeWorkflowArtifact(tempDir, slug, "spec", "# Spec\nRequirements.");
@@ -614,14 +617,16 @@ describe("Workflow E2E — WorkflowCommand", () => {
 			// Phase 3: design — needs spec
 			const designCtx = new MockHookCommandContext(tempDir);
 			const designResult = await cmd.execute(["design", slug], asCtx(designCtx));
+			expect(getActions(designCtx, "activateWorkflowPhase").length).toBeGreaterThanOrEqual(1);
 			expect(getActions(designCtx, "activateWorkflowPhase")[0].args[1]).toBe("design");
-			expect(typeof designResult).toBe("string");
+			expect(designResult as string).toContain("docs/workflow/2024-01-01-full-pipeline/spec.md");
 
 			await writeWorkflowArtifact(tempDir, slug, "design", "# Design\nArchitecture.");
 
 			// Phase 4: plan — needs spec (design is optional in some configs, but present here)
 			const planCtx = new MockHookCommandContext(tempDir);
 			const _planResult = await cmd.execute(["plan", slug], asCtx(planCtx));
+			expect(getActions(planCtx, "activateWorkflowPhase").length).toBeGreaterThanOrEqual(1);
 			expect(getActions(planCtx, "activateWorkflowPhase")[0].args[1]).toBe("plan");
 
 			await writeWorkflowArtifact(tempDir, slug, "plan", "# Plan\nTasks.");
@@ -629,6 +634,7 @@ describe("Workflow E2E — WorkflowCommand", () => {
 			// Phase 5: execute — needs plan
 			const execCtx = new MockHookCommandContext(tempDir);
 			const _execResult = await cmd.execute(["execute", slug], asCtx(execCtx));
+			expect(getActions(execCtx, "activateWorkflowPhase").length).toBeGreaterThanOrEqual(1);
 			expect(getActions(execCtx, "activateWorkflowPhase")[0].args[1]).toBe("execute");
 
 			await writeWorkflowArtifact(tempDir, slug, "execute", "# Execute\nDone.");
@@ -636,6 +642,7 @@ describe("Workflow E2E — WorkflowCommand", () => {
 			// Phase 6: verify — needs spec + execute
 			const verifyCtx = new MockHookCommandContext(tempDir);
 			const _verifyResult = await cmd.execute(["verify", slug], asCtx(verifyCtx));
+			expect(getActions(verifyCtx, "activateWorkflowPhase").length).toBeGreaterThanOrEqual(1);
 			expect(getActions(verifyCtx, "activateWorkflowPhase")[0].args[1]).toBe("verify");
 
 			await writeWorkflowArtifact(tempDir, slug, "verify", "# Verify\nPassed.");
@@ -643,6 +650,7 @@ describe("Workflow E2E — WorkflowCommand", () => {
 			// Phase 7: finish — needs verify
 			const finishCtx = new MockHookCommandContext(tempDir);
 			const _finishResult = await cmd.execute(["finish", slug], asCtx(finishCtx));
+			expect(getActions(finishCtx, "activateWorkflowPhase").length).toBeGreaterThanOrEqual(1);
 			expect(getActions(finishCtx, "activateWorkflowPhase")[0].args[1]).toBe("finish");
 
 			// Simulate finish completion

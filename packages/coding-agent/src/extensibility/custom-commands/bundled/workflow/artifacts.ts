@@ -134,7 +134,11 @@ export function generateSlug(topic: string): string {
 
 /** Format workflow status for display */
 export function formatWorkflowStatus(state: WorkflowState): string {
-	const lines = [`Workflow: ${state.slug}`, `Current phase: ${state.currentPhase}`, "Artifacts:"];
+	const lines = [`Workflow: ${state.slug}`, `Current phase: ${state.currentPhase}`];
+	if (state.status) {
+		lines.push(`Status: ${state.status}`);
+	}
+	lines.push("Artifacts:");
 	for (const [phase, artifactPath] of Object.entries(state.artifacts)) {
 		lines.push(`  ${phase}: ${artifactPath}`);
 	}

@@ -363,7 +363,7 @@ describe("WorkflowCommand — edge cases", () => {
 			// showStatus returns false → showHelp is called instead
 			const notifications = getNotifications(ctx);
 			// showHelp notifies with help text
-			expect(notifications.some(n => n.type === "info")).toBe(true);
+			expect(notifications.some(n => n.type === "info" && n.message.includes("/workflow"))).toBe(true);
 		});
 
 		test("active slug but state.json missing → returns false, shows help", async () => {
@@ -374,7 +374,7 @@ describe("WorkflowCommand — edge cases", () => {
 			await cmd.execute([], asCtx(ctx));
 			// showStatus returns false → showHelp notifies
 			const notifications = getNotifications(ctx);
-			expect(notifications.some(n => n.type === "info")).toBe(true);
+			expect(notifications.some(n => n.type === "info" && n.message.includes("/workflow"))).toBe(true);
 		});
 
 		test("active workflow with valid state → notifies formatted status, returns true", async () => {
@@ -439,7 +439,9 @@ describe("WorkflowCommand — edge cases", () => {
 			state.currentPhase = "spec";
 			fs.writeFileSync(path.join(stateDir, "state.json"), JSON.stringify(state, null, 2));
 			await cmd.execute(["status", slug], asCtx(ctx));
-			const msg = getNotifications(ctx)[0].message;
+			const notif = getNotifications(ctx);
+			expect(notif.length).toBeGreaterThanOrEqual(1);
+			const msg = notif[0].message;
 			expect(msg).toContain("> spec"); // current phase, no artifact
 		});
 
@@ -447,7 +449,9 @@ describe("WorkflowCommand — edge cases", () => {
 			// Create state with limited activePhases
 			await createWorkflowState(tempDir, slug, ["brainstorm", "execute"]);
 			await cmd.execute(["status", slug], asCtx(ctx));
-			const msg = getNotifications(ctx)[0].message;
+			const notif = getNotifications(ctx);
+			expect(notif.length).toBeGreaterThanOrEqual(1);
+			const msg = notif[0].message;
 			// spec, design, plan are not in activePhases → '-' marker
 			expect(msg).toContain("- spec");
 			expect(msg).toContain("- design");
@@ -463,7 +467,9 @@ describe("WorkflowCommand — edge cases", () => {
 			state.status = "abandoned";
 			fs.writeFileSync(path.join(stateDir, "state.json"), JSON.stringify(state, null, 2));
 			await cmd.execute(["status", slug], asCtx(ctx));
-			const msg = getNotifications(ctx)[0].message;
+			const notif = getNotifications(ctx);
+			expect(notif.length).toBeGreaterThanOrEqual(1);
+			const msg = notif[0].message;
 			expect(msg).toContain("abandoned");
 		});
 	});

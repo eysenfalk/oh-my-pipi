@@ -82,8 +82,10 @@ describe("brainstorm prompt", () => {
 			topic: "some topic",
 			slug: "my-unique-slug-1",
 		});
-		const occurrences = result.split("my-unique-slug-1").length - 1;
-		expect(occurrences).toBeGreaterThanOrEqual(2);
+		// Slug must appear in the workflowSlug parameter of the exit_plan_mode call
+		expect(result).toContain('workflowSlug: "my-unique-slug-1"');
+		// Slug must also appear in the workflow slug label
+		expect(result).toContain("`my-unique-slug-1`");
 	});
 
 	test("output contains exit_plan_mode instruction with BRAINSTORM title", () => {
@@ -451,6 +453,6 @@ describe("finish prompt", () => {
 
 	test("result is non-empty string", () => {
 		const result = renderPromptTemplate(finishPrompt, { slug: "finish-slug" });
-		expect(result.length).toBeGreaterThan(0);
+		expect(result).toContain("FINISH");
 	});
 });

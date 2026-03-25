@@ -50,16 +50,31 @@ export class MockHookUI {
 
 	async select(title: string, options: string[]): Promise<string | undefined> {
 		this.calls.push({ method: "select", args: [title, options] });
+		if (this.#selectResponses.length === 0) {
+			throw new Error(
+				`showHookSelector called with no queued response. Title: ${title}, Options: ${JSON.stringify(options)}. Call ui.queueSelect() before the operation.`,
+			);
+		}
 		return this.#selectResponses.shift();
 	}
 
 	async confirm(title: string, message: string): Promise<boolean> {
 		this.calls.push({ method: "confirm", args: [title, message] });
-		return this.#confirmResponses.shift() ?? false;
+		if (this.#confirmResponses.length === 0) {
+			throw new Error(
+				`showHookConfirm called with no queued response. Title: ${title}, Message: ${message}. Call ui.queueConfirm() before the operation.`,
+			);
+		}
+		return this.#confirmResponses.shift() as boolean;
 	}
 
 	async input(title: string, placeholder?: string): Promise<string | undefined> {
 		this.calls.push({ method: "input", args: [title, placeholder] });
+		if (this.#inputResponses.length === 0) {
+			throw new Error(
+				`showHookInput called with no queued response. Title: ${title}, Placeholder: ${placeholder}. Call ui.queueInput() before the operation.`,
+			);
+		}
 		return this.#inputResponses.shift();
 	}
 

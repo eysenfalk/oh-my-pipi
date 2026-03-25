@@ -97,7 +97,7 @@ describe("Workflow Approval — edge cases", () => {
 			const specCtx = new MockApprovalContext({ selectResponses: ["Approve"] });
 			const specResult = await runApprovalGate("spec", specCtx);
 			expect(specResult.approved).toBe(true);
-			expect(specCtx.selectCalls.length).toBeGreaterThanOrEqual(1);
+			expect(specCtx.selectCalls).toHaveLength(1);
 
 			// design=agent → reviewPrompt, no UI calls
 			const designCtx = new MockApprovalContext();
@@ -127,7 +127,7 @@ describe("Workflow Approval — edge cases", () => {
 			const verifyCtx = new MockApprovalContext({ selectResponses: ["Approve"] });
 			const verifyResult = await runApprovalGate("verify", verifyCtx);
 			expect(verifyResult.approved).toBe(true);
-			expect(verifyCtx.selectCalls.length).toBeGreaterThanOrEqual(1);
+			expect(verifyCtx.selectCalls).toHaveLength(1);
 		});
 	});
 
@@ -147,7 +147,7 @@ describe("Workflow Approval — edge cases", () => {
 
 			// Falls through to runUserApproval — must have called select
 			expect(result.approved).toBe(true);
-			expect(ctx.selectCalls.length).toBeGreaterThanOrEqual(1);
+			expect(ctx.selectCalls).toHaveLength(1);
 		});
 	});
 
@@ -166,9 +166,7 @@ describe("Workflow Approval — edge cases", () => {
 			const result = await runApprovalGate("brainstorm", ctx);
 
 			expect(hasReviewPrompt(result)).toBe(true);
-			if (hasReviewPrompt(result)) {
-				expect(result.reviewPrompt).toContain("critic");
-			}
+			expect((result as { approved: false; reviewPrompt: string }).reviewPrompt).toContain("critic");
 		});
 
 		test("reviewAgent=reviewer is mentioned in the agent-mode reviewPrompt", async () => {
@@ -185,9 +183,7 @@ describe("Workflow Approval — edge cases", () => {
 			const result = await runApprovalGate("spec", ctx);
 
 			expect(hasReviewPrompt(result)).toBe(true);
-			if (hasReviewPrompt(result)) {
-				expect(result.reviewPrompt).toContain("reviewer");
-			}
+			expect((result as { approved: false; reviewPrompt: string }).reviewPrompt).toContain("reviewer");
 		});
 
 		test("reviewAgent=critic is mentioned in the both-mode reviewPrompt", async () => {
@@ -204,9 +200,7 @@ describe("Workflow Approval — edge cases", () => {
 			const result = await runApprovalGate("design", ctx);
 
 			expect(hasReviewPrompt(result)).toBe(true);
-			if (hasReviewPrompt(result)) {
-				expect(result.reviewPrompt).toContain("critic");
-			}
+			expect((result as { approved: false; reviewPrompt: string }).reviewPrompt).toContain("critic");
 		});
 
 		test("reviewAgent=reviewer is mentioned in the both-mode reviewPrompt", async () => {
@@ -223,9 +217,7 @@ describe("Workflow Approval — edge cases", () => {
 			const result = await runApprovalGate("plan", ctx);
 
 			expect(hasReviewPrompt(result)).toBe(true);
-			if (hasReviewPrompt(result)) {
-				expect(result.reviewPrompt).toContain("reviewer");
-			}
+			expect((result as { approved: false; reviewPrompt: string }).reviewPrompt).toContain("reviewer");
 		});
 	});
 
@@ -244,10 +236,8 @@ describe("Workflow Approval — edge cases", () => {
 			const result = await runApprovalGate("brainstorm", ctx);
 
 			expect(hasReviewPrompt(result)).toBe(true);
-			if (hasReviewPrompt(result)) {
-				expect(result.reviewPrompt).toContain("3");
-				expect(result.reviewPrompt).toContain("iterations");
-			}
+			expect((result as { approved: false; reviewPrompt: string }).reviewPrompt).toContain("3");
+			expect((result as { approved: false; reviewPrompt: string }).reviewPrompt).toContain("iterations");
 		});
 
 		test("maxReviewRounds=1 produces singular 'iteration' in reviewPrompt", async () => {
@@ -264,12 +254,10 @@ describe("Workflow Approval — edge cases", () => {
 			const result = await runApprovalGate("spec", ctx);
 
 			expect(hasReviewPrompt(result)).toBe(true);
-			if (hasReviewPrompt(result)) {
-				expect(result.reviewPrompt).toContain("1");
-				// Singular: "iteration" not "iterations"
-				expect(result.reviewPrompt).toMatch(/\biteration\b/);
-				expect(result.reviewPrompt).not.toMatch(/\biterations\b/);
-			}
+			expect((result as { approved: false; reviewPrompt: string }).reviewPrompt).toContain("1");
+			// Singular: "iteration" not "iterations"
+			expect((result as { approved: false; reviewPrompt: string }).reviewPrompt).toMatch(/\biteration\b/);
+			expect((result as { approved: false; reviewPrompt: string }).reviewPrompt).not.toMatch(/\biterations\b/);
 		});
 
 		test("maxReviewRounds=5 produces '5' and plural 'iterations' in reviewPrompt", async () => {
@@ -286,10 +274,8 @@ describe("Workflow Approval — edge cases", () => {
 			const result = await runApprovalGate("design", ctx);
 
 			expect(hasReviewPrompt(result)).toBe(true);
-			if (hasReviewPrompt(result)) {
-				expect(result.reviewPrompt).toContain("5");
-				expect(result.reviewPrompt).toContain("iterations");
-			}
+			expect((result as { approved: false; reviewPrompt: string }).reviewPrompt).toContain("5");
+			expect((result as { approved: false; reviewPrompt: string }).reviewPrompt).toContain("iterations");
 		});
 	});
 
@@ -314,7 +300,7 @@ describe("Workflow Approval — edge cases", () => {
 			const result = await runApprovalGate("brainstorm", ctx);
 
 			expect(result.approved).toBe(true);
-			expect(ctx.selectCalls.length).toBeGreaterThanOrEqual(1);
+			expect(ctx.selectCalls).toHaveLength(1);
 		});
 
 		test("changing mode between two calls produces different behavior each time", async () => {
@@ -471,9 +457,7 @@ describe("Workflow Approval — edge cases", () => {
 				const result = await runApprovalGate(phase, ctx);
 
 				expect(hasReviewPrompt(result)).toBe(true);
-				if (hasReviewPrompt(result)) {
-					expect(result.reviewPrompt).toContain(phase);
-				}
+				expect((result as { approved: false; reviewPrompt: string }).reviewPrompt).toContain(phase);
 			});
 		}
 	});

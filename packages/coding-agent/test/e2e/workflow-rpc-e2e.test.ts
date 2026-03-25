@@ -180,7 +180,7 @@ describe.skipIf(!API_KEY)("Workflow RPC E2E (MiniMax M2.7)", () => {
 				return false;
 			}
 		});
-		expect(slugDirs.length).toBeGreaterThanOrEqual(1);
+		expect(slugDirs.length).toBe(1);
 
 		const slug = slugDirs[0]!;
 		expect(slug).toMatch(/^\d{4}-\d{2}-\d{2}-/);
@@ -190,9 +190,8 @@ describe.skipIf(!API_KEY)("Workflow RPC E2E (MiniMax M2.7)", () => {
 		const state = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
 		expect(state.slug).toBe(slug);
 		// After brainstorm completes and approval, artifact should exist
-		if (state.artifacts?.brainstorm) {
-			expect(fs.existsSync(path.join(workflowDir, slug, "brainstorm.md"))).toBe(true);
-		}
+		expect(state.artifacts?.brainstorm).toBeDefined();
+		expect(fs.existsSync(path.join(workflowDir, slug, "brainstorm.md"))).toBe(true);
 	}, 240_000);
 
 	// -----------------------------------------------------------------------
@@ -228,6 +227,8 @@ describe.skipIf(!API_KEY)("Workflow RPC E2E (MiniMax M2.7)", () => {
 		// Agent turn started — prerequisites were satisfied, prompt was submitted
 		expect(events.some(e => e.type === "agent_start")).toBe(true);
 		expect(events.some(e => e.type === "agent_end")).toBe(true);
+		const hasToolUse = events.some(e => e.type === "tool_execution_start" || e.type === "message_start");
+		expect(hasToolUse).toBe(true);
 	}, 600_000);
 
 	// -----------------------------------------------------------------------
@@ -246,8 +247,12 @@ describe.skipIf(!API_KEY)("Workflow RPC E2E (MiniMax M2.7)", () => {
 		// Should have received at least one notification about the problem
 		// (either slug not found or missing prerequisite)
 		expect(notifications.length).toBeGreaterThanOrEqual(1);
-		const hasError = notifications.some(n => n.method === "notify" && typeof n.message === "string");
-		expect(hasError).toBe(true);
+		const errorNotify = notifications.find(n => n.method === "notify");
+		expect(errorNotify).toBeDefined();
+		const errorMessage = (errorNotify as { message: string }).message;
+		// Should mention the slug or missing prerequisite
+		expect(typeof errorMessage).toBe("string");
+		expect(errorMessage.length).toBeGreaterThan(0);
 	}, 15_000);
 
 	// -----------------------------------------------------------------------

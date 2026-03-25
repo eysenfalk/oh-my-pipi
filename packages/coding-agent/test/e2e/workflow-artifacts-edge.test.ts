@@ -107,6 +107,9 @@ describe("Workflow Artifacts — edge cases", () => {
 			expect(state.artifacts.brainstorm).toBe(`${WORKFLOW_DIR}/${slug}/brainstorm.md`);
 			// Artifact path must still be correct (not duplicated, not corrupted)
 			expect(Object.keys(state.artifacts)).toHaveLength(1);
+			// Actual file must contain the last-written content
+			const written = await Bun.file(path.join(workflowDir(tempDir, slug), "brainstorm.md")).text();
+			expect(written).toBe("second");
 		});
 
 		test("writing a later phase before an earlier one — state updated to that phase", async () => {
@@ -241,6 +244,8 @@ describe("Workflow Artifacts — edge cases", () => {
 			// Second call's phases win; artifacts reset to empty
 			expect(state.activePhases).toEqual(phases2);
 			expect(state.artifacts).toEqual({});
+			// createWorkflowState always resets currentPhase to brainstorm
+			expect(state.currentPhase).toBe("brainstorm");
 		});
 
 		test("activePhases empty array — stored as empty array (not omitted)", async () => {
@@ -514,6 +519,9 @@ describe("Workflow Artifacts — edge cases", () => {
 				artifacts: {},
 			};
 			const result = formatWorkflowStatus(state);
+			// Slug and current phase must always be present
+			expect(result).toContain("2024-01-01-no-artifacts");
+			expect(result).toContain("brainstorm");
 			expect(result).toContain("Artifacts:");
 			const lines = result.split("\n");
 			const artifactsIdx = lines.indexOf("Artifacts:");
@@ -530,14 +538,12 @@ describe("Workflow Artifacts — edge cases", () => {
 				},
 				status: "abandoned",
 			};
-			// formatWorkflowStatus uses Object.entries(state.artifacts), so abandoned
-			// status is not explicitly rendered by the current impl — but the state
-			// object itself carries it. Verify the function doesn't throw and basic
-			// fields are present.
 			const result = formatWorkflowStatus(state);
 			expect(result).toContain("Workflow: 2024-01-01-abandoned");
 			expect(result).toContain("Current phase: plan");
 			expect(result).toContain("brainstorm:");
+			// Status field must appear in output
+			expect(result).toContain("abandoned");
 		});
 	});
 

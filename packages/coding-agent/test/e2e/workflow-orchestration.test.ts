@@ -229,7 +229,7 @@ describe("InteractiveMode workflow orchestration", () => {
 				workflowPhase: "brainstorm",
 			});
 
-			expect(harness.captures.submissions.some(s => s.text.length > 0)).toBe(true);
+			expect(harness.captures.submissions.some(s => s.text.includes("Rejected"))).toBe(true);
 			await harness.assertArtifactMissing("reject-slug", "brainstorm");
 		});
 
@@ -247,7 +247,7 @@ describe("InteractiveMode workflow orchestration", () => {
 
 			// Review prompt submitted — agent must evaluate
 			expect(harness.captures.submissions).toHaveLength(1);
-			expect(harness.captures.submissions[0]!.text.length).toBeGreaterThan(0);
+			expect(harness.captures.submissions[0]!.text).toContain("brainstorm phase output is ready for review");
 			// No selector calls — agent mode doesn't ask the user
 			expect(harness.captures.selectorCalls).toHaveLength(0);
 			// No artifact written yet
@@ -548,7 +548,7 @@ describe("InteractiveMode workflow orchestration", () => {
 			expect(state).not.toBeNull();
 			expect(state!.slug).toBe("my-feature-slug");
 			expect(harness.captures.submissions).toHaveLength(1);
-			expect(harness.captures.submissions[0]!.text.length).toBeGreaterThan(0);
+			expect(harness.captures.submissions[0]!.text).toContain("my-feature-slug");
 		});
 
 		it("empty slug input — returns without creating state", async () => {
@@ -812,6 +812,62 @@ describe("InteractiveMode workflow orchestration", () => {
 			});
 			// Next phase after brainstorm in activePhases ["brainstorm","spec","plan"] is "spec"
 			expect(harness.captures.editorTexts).toContain(`/workflow spec ${slug}`);
+		});
+	});
+	// =========================================================================
+	// handleStartWorkflowTool — slug placeholder; handleExitPlanModeTool fallback
+	// =========================================================================
+
+	describe("workflow slug and exit_plan_mode fallback", () => {
+		it("handleStartWorkflowTool passes recommended slug as placeholder", async () => {
+			harness = await makeHarness();
+
+			// Queue input response (confirm the slug)
+			harness.queueInputResponse("my-cool-feature-slug");
+			await harness.handleStartWorkflowTool({ topic: "My Cool Feature" });
+
+			// showHookInput should have been called once with the generated slug as placeholder
+			expect(harness.captures.inputCalls.length).toBe(1);
+			const inputCall = harness.captures.inputCalls[0]!;
+			expect(inputCall.placeholder).toBeDefined();
+			// Placeholder should contain a date-prefixed sanitized version of the topic
+			expect(inputCall.placeholder).toMatch(/^\d{4}-\d{2}-\d{2}-my-cool-feature/);
+		});
+
+		it("exit_plan_mode falls back to active workflow when agent omits params", async () => {
+			harness = await makeHarness();
+			await createWorkflowState(harness.cwd, "test-slug");
+
+			// Set active workflow context (simulates a prior phase completing)
+			harness.setActiveWorkflow("test-slug", "brainstorm", null);
+			await harness.writePlanFile("BRAINSTORM.md", "# Brainstorm output");
+
+			// Default approval mode is "user" — queue Approve then Stop here
+			harness.queueSelectorResponse("Approve");
+			harness.queueSelectorResponse("Stop here");
+
+			// Call handleExitPlanModeTool WITHOUT workflowSlug/workflowPhase
+			await harness.handleExitPlanModeTool({
+				planFilePath: "local://BRAINSTORM.md",
+				planExists: true,
+			});
+
+			// Should NOT show 'Plan mode is not active' warning — fallback resolved the context
+			expect(harness.captures.warnings).not.toContain("Plan mode is not active.");
+
+			// Should have completed the workflow phase (artifact written)
+			await harness.assertArtifactExists("test-slug", "brainstorm");
+		});
+
+		it("exit_plan_mode without workflow or plan mode shows warning", async () => {
+			harness = await makeHarness();
+
+			await harness.handleExitPlanModeTool({
+				planFilePath: "local://PLAN.md",
+				planExists: true,
+			});
+
+			expect(harness.captures.warnings).toContain("Plan mode is not active.");
 		});
 	});
 });

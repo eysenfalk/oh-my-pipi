@@ -813,15 +813,19 @@ export class InteractiveMode implements InteractiveModeContext {
 	}
 
 	async handleExitPlanModeTool(details: ExitPlanModeDetails): Promise<void> {
-		// Workflow phase completion (agent passed workflowSlug + workflowPhase)
-		if (details.workflowSlug && details.workflowPhase) {
+		// Fall back to active workflow context when agent omits workflow params
+		const workflowSlug = details.workflowSlug || this.#activeWorkflowSlug;
+		const workflowPhase = details.workflowPhase || this.#activeWorkflowPhase;
+
+		// Workflow phase completion
+		if (workflowSlug && workflowPhase) {
 			const validPhases = ["brainstorm", "spec", "design", "plan", "execute", "verify", "finish"];
-			if (!validPhases.includes(details.workflowPhase)) {
-				this.showWarning(`Unknown workflow phase "${details.workflowPhase}". Ignoring.`);
+			if (!validPhases.includes(workflowPhase)) {
+				this.showWarning(`Unknown workflow phase "${workflowPhase}". Ignoring.`);
 				return;
 			}
 			await this.session.abort();
-			await this.#handleWorkflowPhaseComplete(details.workflowSlug, details.workflowPhase as WorkflowPhase, details);
+			await this.#handleWorkflowPhaseComplete(workflowSlug, workflowPhase as WorkflowPhase, details);
 			return;
 		}
 

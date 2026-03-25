@@ -99,7 +99,7 @@ describe("Workflow Approval", () => {
 
 				expect(result.approved).toBe(true);
 				// At least one select call was made (delegated to runUserApproval)
-				expect(ctx.selectCalls.length).toBeGreaterThanOrEqual(1);
+				expect(ctx.selectCalls).toHaveLength(1);
 			});
 
 			test("default mode is user — calls context.select", async () => {
@@ -108,7 +108,7 @@ describe("Workflow Approval", () => {
 				const result = await runApprovalGate("brainstorm", ctx);
 
 				expect(result.approved).toBe(true);
-				expect(ctx.selectCalls.length).toBeGreaterThanOrEqual(1);
+				expect(ctx.selectCalls).toHaveLength(1);
 			});
 		});
 
@@ -136,9 +136,7 @@ describe("Workflow Approval", () => {
 
 				expect(result.approved).toBe(false);
 				expect(hasReviewPrompt(result)).toBe(true);
-				if (hasReviewPrompt(result)) {
-					expect(result.reviewPrompt).toContain("design");
-				}
+				expect((result as { approved: false; reviewPrompt: string }).reviewPrompt).toContain("design");
 			});
 		});
 
@@ -169,11 +167,11 @@ describe("Workflow Approval", () => {
 				expect(hasReviewPrompt(agentResult)).toBe(true);
 				expect(hasReviewPrompt(bothResult)).toBe(true);
 
-				if (hasReviewPrompt(agentResult) && hasReviewPrompt(bothResult)) {
-					// "both" appends an extra user-approval note
-					expect(bothResult.reviewPrompt.length).toBeGreaterThan(agentResult.reviewPrompt.length);
-					expect(bothResult.reviewPrompt).toContain("user");
-				}
+				// "both" appends an extra user-approval note
+				expect((bothResult as { approved: false; reviewPrompt: string }).reviewPrompt.length).toBeGreaterThan(
+					(agentResult as { approved: false; reviewPrompt: string }).reviewPrompt.length,
+				);
+				expect((bothResult as { approved: false; reviewPrompt: string }).reviewPrompt).toContain("user");
 			});
 		});
 	});
